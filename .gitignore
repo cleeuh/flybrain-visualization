@@ -1,0 +1,14 @@
+# Godot 4
+.godot/
+*.import
+.import/
+export.cfg
+*.translation
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Downloaded / generated connectome data (run tools/fetch_data.py)
+data/

@@ -1,0 +1,259 @@
+extends Node
+## Male CNS connectome viewer — glue: loads data, builds the scene, handles keys and UI.
+##
+## Command line (after `++`):  --sbs=half|full|mono  --swap  --ipd=0.033  --conv=1.0  --fov=70
+##                              --width=1.2  --brightness=0.02  --rois  --no-shells  --no-rotate
+##                              --fullscreen  --help=0
+
+const CONFIG_PATH := "user://flyviz.cfg"
+
+@onready var scene_root: Node3D = $Scene
+@onready var rig: OrbitRig = $Rig
+@onready var stereo: StereoRig = $Stereo
+
+var neurons: Neurons
+var shells: Node3D
+var rois: Node3D
+var legends: Array[Control] = []
+var help_visible := true
+var ribbon_width := 1.2
+var brightness := 0.02
+var highlight_idx := -1
+
+
+func _ready() -> void:
+	get_viewport().disable_3d = true   # only the eye SubViewports render 3D
+	stereo.head = rig.head
+	_load_config()
+	_build_environment()
+	_build_meshes()
+	neurons = Neurons.new()
+	neurons.name = "Neurons"
+	scene_root.add_child(neurons)
+	neurons.load_data()
+	_apply_cmdline()
+	neurons.set_width(ribbon_width)
+	neurons.set_brightness(brightness)
+	_build_ui()
+	_update_ui()
+
+
+func _process(_dt: float) -> void:
+	stereo.target_distance = rig.distance
+
+
+# --------------------------------------------------------------------------- scene
+
+func _build_environment() -> void:
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.01, 0.01, 0.02)
+	env.glow_enabled = true
+	env.glow_intensity = 0.4
+	env.glow_bloom = 0.0
+	env.glow_hdr_threshold = 1.0
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	var we := WorldEnvironment.new()
+	we.environment = env
+	scene_root.add_child(we)
+
+
+func _shell_material(color: Color, fill: float, rim: float) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/shell.gdshader")
+	m.set_shader_parameter("color", color)
+	m.set_shader_parameter("fill", fill)
+	m.set_shader_parameter("rim", rim)
+	return m
+
+
+func _build_meshes() -> void:
+	shells = Node3D.new()
+	shells.name = "Shells"
+	scene_root.add_child(shells)
+	for n in ["brain_shell", "vnc_shell"]:
+		var mesh := BMesh.load("res://data/meshes/%s.bmesh" % n)
+		if mesh == null:
+			continue
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = _shell_material(Color(0.35, 0.55, 1.0, 0.25), 0.02, 0.35)
+		shells.add_child(mi)
+
+	rois = Node3D.new()
+	rois.name = "ROIs"
+	rois.visible = false
+	scene_root.add_child(rois)
+	var list = JSON.parse_string(FileAccess.get_file_as_string("res://data/rois.json"))
+	if list == null:
+		return
+	var i := 0
+	for r in list:
+		var mesh := BMesh.load("res://data/meshes/%s" % r.file)
+		if mesh == null:
+			continue
+		var mi := MeshInstance3D.new()
+		mi.name = r.name
+		mi.mesh = mesh
+		var hue := fmod(i * 0.618033988, 1.0)   # golden-ratio hue spread, L/R pairs adjacent
+		mi.material_override = _shell_material(Color.from_hsv(hue, 0.6, 1.0, 0.7), 0.05, 0.5)
+		rois.add_child(mi)
+		i += 1
+	print("ROIs: %d neuropil meshes" % i)
+
+
+# --------------------------------------------------------------------------- input
+
+func _unhandled_key_input(e: InputEvent) -> void:
+	if not (e is InputEventKey and e.pressed and not e.echo):
+		return
+	var k: int = e.keycode
+	var shift: bool = e.shift_pressed
+	match k:
+		KEY_ESCAPE: get_tree().quit()
+		KEY_F11, KEY_F: _toggle_fullscreen()
+		KEY_H: help_visible = not help_visible
+		KEY_SPACE: rig.auto_rotate = not rig.auto_rotate
+		KEY_B: shells.visible = not shells.visible
+		KEY_R: rois.visible = not rois.visible
+		KEY_T: stereo.cycle_mode()
+		KEY_X: stereo.swap_eyes = not stereo.swap_eyes
+		KEY_BRACKETLEFT: stereo.ipd_ratio = maxf(stereo.ipd_ratio / 1.15, 0.001)
+		KEY_BRACKETRIGHT: stereo.ipd_ratio = minf(stereo.ipd_ratio * 1.15, 0.2)
+		KEY_MINUS: stereo.convergence_factor = maxf(stereo.convergence_factor / 1.1, 0.2)
+		KEY_EQUAL: stereo.convergence_factor = minf(stereo.convergence_factor * 1.1, 5.0)
+		KEY_COMMA: ribbon_width = maxf(ribbon_width - 0.5, 0.5); neurons.set_width(ribbon_width)
+		KEY_PERIOD: ribbon_width = minf(ribbon_width + 0.5, 12.0); neurons.set_width(ribbon_width)
+		KEY_SEMICOLON: brightness = maxf(brightness / 1.25, 0.005); neurons.set_brightness(brightness)
+		KEY_APOSTROPHE: brightness = minf(brightness * 1.25, 2.0); neurons.set_brightness(brightness)
+		KEY_N: _step_highlight(-1 if shift else 1)
+		KEY_M: highlight_idx = -1; neurons.set_highlight(-1)
+		KEY_C: _save_config()
+		KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
+			var n := (k - KEY_0 + 9) % 10          # 1..9 -> 0..8, 0 -> 9
+			if shift:
+				n += 10
+			if n < neurons.groups.size():
+				neurons.toggle_group(n)
+		KEY_ASCIITILDE, KEY_QUOTELEFT:
+			var any_hidden := false
+			for g in neurons.groups:
+				if neurons.group_visible[int(g.id)] < 0.5:
+					any_hidden = true
+			neurons.set_all_visible(any_hidden)
+		_:
+			return
+	_update_ui()
+
+
+func _step_highlight(dir: int) -> void:
+	if neurons.index.is_empty():
+		return
+	highlight_idx = posmod(highlight_idx + dir, neurons.index.size())
+	neurons.set_highlight(highlight_idx)
+
+
+func _toggle_fullscreen() -> void:
+	var w := get_window()
+	if w.mode == Window.MODE_FULLSCREEN or w.mode == Window.MODE_EXCLUSIVE_FULLSCREEN:
+		w.mode = Window.MODE_WINDOWED
+	else:
+		w.mode = Window.MODE_FULLSCREEN
+
+
+# --------------------------------------------------------------------------- UI (drawn in each eye)
+
+func _build_ui() -> void:
+	for layer in stereo.ui_layers():
+		var lbl := RichTextLabel.new()
+		lbl.bbcode_enabled = true
+		lbl.scroll_active = false
+		lbl.fit_content = true
+		lbl.position = Vector2(24, 24)
+		lbl.size = Vector2(560, 900)
+		lbl.add_theme_font_size_override("normal_font_size", 18)
+		lbl.add_theme_font_size_override("bold_font_size", 18)
+		lbl.add_theme_font_size_override("mono_font_size", 18)
+		layer.add_child(lbl)
+		legends.append(lbl)
+
+
+func _update_ui() -> void:
+	var t := "[b]Drosophila male CNS connectome[/b]  [color=#888](FlyEM / Janelia, male-cns v1.0, CC-BY)[/color]\n"
+	t += "[color=#aaa]%d neurons · %d skeleton segments · %s%s[/color]\n\n" % [
+		neurons.index.size(), neurons.segment_count, stereo.mode_name(), "  (eyes swapped)" if stereo.swap_eyes else ""]
+	var i := 0
+	for g in neurons.groups:
+		var on: bool = neurons.group_visible[int(g.id)] > 0.5
+		var key := str((i + 1) % 10) if i < 10 else "⇧%d" % ((i - 9) % 10)
+		var c := neurons.group_color(int(g.id))
+		var name: String = String(g.name).replace("_", " ")
+		t += "[color=#%s]%s[/color] [color=#666]%s[/color] %s [color=#666](%d)[/color]\n" % [
+			c.to_html(false) if on else "444", "■" if on else "□", key, name, int(g.count)]
+		i += 1
+	if highlight_idx >= 0:
+		var n = neurons.index[highlight_idx]
+		t += "\n[color=#fff]highlight:[/color] body %d  %s  [%s]\n" % [int(n.bodyId), str(n.type), neurons.groups[int(n.group)].name]
+	if help_visible:
+		t += "\n[color=#777]drag / arrows: orbit   wheel / Q E: zoom   space: auto-rotate\n"
+		t += "1-9 0 ⇧: toggle class   `: all   B: shells   R: neuropils\n"
+		t += "T: stereo mode   X: swap eyes   [ ]: eye separation (%.3f)   - =: convergence (%.2f)\n" % [stereo.ipd_ratio, stereo.convergence_factor]
+		t += ", .: width (%.1f)   ; \': brightness (%.3f)   N / ⇧N: step neuron   M: clear   F: fullscreen   C: save config   H: hide help[/color]" % [ribbon_width, brightness]
+	for l in legends:
+		l.text = t
+
+
+# --------------------------------------------------------------------------- config
+
+func _load_config() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(CONFIG_PATH) != OK:
+		return
+	stereo.mode = cfg.get_value("stereo", "mode", stereo.mode)
+	stereo.swap_eyes = cfg.get_value("stereo", "swap_eyes", stereo.swap_eyes)
+	stereo.ipd_ratio = cfg.get_value("stereo", "ipd_ratio", stereo.ipd_ratio)
+	stereo.convergence_factor = cfg.get_value("stereo", "convergence_factor", stereo.convergence_factor)
+	stereo.hfov_deg = cfg.get_value("stereo", "hfov_deg", stereo.hfov_deg)
+	ribbon_width = cfg.get_value("view", "ribbon_width", ribbon_width)
+	brightness = cfg.get_value("view", "brightness", brightness)
+	rig.auto_rotate = cfg.get_value("view", "auto_rotate", rig.auto_rotate)
+	rig.auto_rotate_speed = cfg.get_value("view", "auto_rotate_speed", rig.auto_rotate_speed)
+	help_visible = cfg.get_value("view", "help", help_visible)
+	stereo.set_mode(stereo.mode)
+
+
+func _save_config() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("stereo", "mode", stereo.mode)
+	cfg.set_value("stereo", "swap_eyes", stereo.swap_eyes)
+	cfg.set_value("stereo", "ipd_ratio", stereo.ipd_ratio)
+	cfg.set_value("stereo", "convergence_factor", stereo.convergence_factor)
+	cfg.set_value("stereo", "hfov_deg", stereo.hfov_deg)
+	cfg.set_value("view", "ribbon_width", ribbon_width)
+	cfg.set_value("view", "brightness", brightness)
+	cfg.set_value("view", "auto_rotate", rig.auto_rotate)
+	cfg.set_value("view", "auto_rotate_speed", rig.auto_rotate_speed)
+	cfg.set_value("view", "help", help_visible)
+	cfg.save(CONFIG_PATH)
+	print("config saved to ", ProjectSettings.globalize_path(CONFIG_PATH))
+
+
+func _apply_cmdline() -> void:
+	for arg in OS.get_cmdline_user_args():
+		var kv := arg.trim_prefix("--").split("=", true, 1)
+		var key := kv[0]
+		var val := kv[1] if kv.size() > 1 else ""
+		match key:
+			"sbs": stereo.set_mode({"half": StereoRig.Mode.HALF, "full": StereoRig.Mode.FULL, "mono": StereoRig.Mode.MONO}.get(val, stereo.mode))
+			"ipd": stereo.ipd_ratio = float(val)
+			"conv": stereo.convergence_factor = float(val)
+			"fov": stereo.hfov_deg = float(val)
+			"width": ribbon_width = float(val)
+			"brightness": brightness = float(val)
+			"swap": stereo.swap_eyes = true
+			"no-rotate": rig.auto_rotate = false
+			"rois": rois.visible = true
+			"no-shells": shells.visible = false
+			"fullscreen": get_window().mode = Window.MODE_FULLSCREEN
+			"help": help_visible = val != "0"
