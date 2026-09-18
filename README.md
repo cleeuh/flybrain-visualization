@@ -34,24 +34,30 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
 
 ## Setup
 
-1. Fetch and convert the data (~600 MB download, cached in `data/raw/`; produces ~230 MB in `data/`):
+1. Fetch and convert the data (~1.8 GB download, cached in `data/raw/`; produces ~230 MB in `data/`):
 
    ```sh
-   pip install -r tools/requirements.txt
-   python3 tools/fetch_data.py                 # defaults: 5.1k neurons, 0.8 µm skeleton tolerance
-   python3 tools/fetch_data.py --neurons 2 --skel-eps 0.5    # denser (more GPU memory)
-   python3 tools/build_sim.py                  # synaptic graph + neuropil membership for the simulation
+   ./download_data.sh                          # installs python deps, runs both steps below
+   ./download_data.sh --neurons 2 --skel-eps 0.5    # denser sample (more GPU memory)
    ```
 
-   `build_sim.py` additionally downloads the 1.1 GB connectome-weights table and the
-   neurotransmitter table (cached in `data/raw/`).
+   This runs `tools/fetch_data.py` (meshes + skeletons) and `tools/build_sim.py`
+   (synaptic graph + neuropil membership for the simulation).
 
 2. Run:
 
    ```sh
-   godot --path . ++ --sbs=half --fullscreen          # squeezed half-SBS (3D TV / most walls)
-   godot --path . ++ --sbs=full                        # window two frames wide, full-res per eye
-   godot --path . ++ --sbs=mono                        # plain 3D
+   godot --path . ++ --3d=half --fullscreen           # squeezed side-by-side (single-input 3D TV / wall)
+   godot --path . ++ --3d=tb --fullscreen             # squeezed top-and-bottom
+   godot --path . ++ --3d=rows --fullscreen           # line-interleaved (passive / polarised walls)
+   godot --path . ++ --3d=full                        # window two frames wide, full-res per eye
+   godot --path . ++ --3d=mono                        # plain 3D
+
+   All formats: `half` `full` `tb` `rows` `columns` `checkerboard` `sequential` `mono`.
+   Interleaved / checkerboard need the window pixel-exact at the wall's native resolution
+   (`--fullscreen`); `sequential` needs vsync at twice the eye rate (active shutter).
+   If a wall's menu says "single 3D" it takes one input carrying both eyes — pick the packing
+   named in that menu. `X` swaps eyes if the depth looks inside-out.
    ```
 
    Other flags: `--swap` `--ipd=0.033` `--conv=1.0` `--fov=70` `--width=1.2`
@@ -71,7 +77,7 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
 | space | auto-rotate |
 | 1-9 0, ⇧1-4 | toggle neuron class; `` ` `` all |
 | B / R | brain+VNC shells / neuropil ROIs |
-| T | stereo mode (half SBS → full SBS → mono) |
+| T | cycle 3D format (SBS half → SBS full → top-bottom → rows → columns → checkerboard → sequential → mono) |
 | X | swap eyes |
 | [ ] | eye separation |
 | - = | convergence (zero-parallax) plane |
@@ -83,13 +89,25 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
 | C | save config |
 | Esc | quit |
 
+## Building a standalone executable
+
+```sh
+./export.sh            # build/godot-fly.x86_64 + build/godot-fly.exe + shared godot-fly.pck
+./export.sh windows    # one platform
+```
+
+Installs the matching export templates on first run. Ship the executable together with
+`godot-fly.pck` (the resource pack with all scenes, shaders and data); no Godot or Python
+needed on the target machine.
+
 ## How the stereo works
 
 `scripts/stereo_rig.gd` renders the shared `World3D` into two `SubViewport`s with
 off-axis (asymmetric-frustum) cameras (`Camera3D.PROJECTION_FRUSTUM` + `frustum_offset`),
-converged on the orbit target, and composites them side by side. In *half* mode each eye
-is rendered at full window resolution and squeezed into its half, so the wall's SBS
-un-squeeze restores the correct aspect. UI is drawn into each eye at zero parallax.
+converged on the orbit target, and packs them with `shaders/stereo_composite.gdshader`
+into the display's format. In the squeezed formats each eye is rendered at full window
+resolution, so the wall's un-squeeze restores the correct aspect. UI is drawn into each
+eye at zero parallax.
 
 Scene units are micrometres; the EM Y axis is flipped and the CNS is centred at the origin.
 

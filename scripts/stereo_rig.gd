@@ -1,16 +1,26 @@
 class_name StereoRig
 extends Control
-## Side-by-side stereo output for 3D display walls.
+## Stereo output for 3D display walls.
 ##
 ## Renders the shared 3D world twice (left / right eye) into SubViewports with
-## off-axis (asymmetric-frustum) projections and composites them side by side.
-##   HALF  - one window, each eye squeezed into half the width (3D TV / most walls)
-##   FULL  - window is two frames wide, each eye at full resolution (dual-output walls)
-##   MONO  - single camera, no stereo
+## off-axis (asymmetric-frustum) projections, then packs both into the window with
+## shaders/stereo_composite.gdshader in the format the display expects:
+##   SBS_HALF     one frame, eyes squeezed side by side        ("single input" 3D TVs / walls)
+##   SBS_FULL     window two frames wide, each eye full-res     (dual-output walls, or one 2x-wide input)
+##   TOP_BOTTOM   one frame, eyes squeezed top / bottom
+##   ROW_INTERLEAVED, COLUMN_INTERLEAVED, CHECKERBOARD   passive (polarised) walls; window must be
+##                pixel-exact fullscreen at native resolution
+##   SEQUENTIAL   alternate eyes every frame (active shutter; needs vsync at 2x eye rate)
+##   MONO         single camera
 
-enum Mode { HALF, FULL, MONO }
+enum Mode { SBS_HALF, SBS_FULL, TOP_BOTTOM, ROW_INTERLEAVED, COLUMN_INTERLEAVED, CHECKERBOARD, SEQUENTIAL, MONO }
+const MODE_NAMES := ["SBS half", "SBS full", "top-bottom", "row interleaved", "column interleaved", "checkerboard", "frame sequential", "mono"]
+const MODE_KEYS := {"half": Mode.SBS_HALF, "sbs": Mode.SBS_HALF, "full": Mode.SBS_FULL, "tb": Mode.TOP_BOTTOM,
+	"top-bottom": Mode.TOP_BOTTOM, "rows": Mode.ROW_INTERLEAVED, "row": Mode.ROW_INTERLEAVED,
+	"columns": Mode.COLUMN_INTERLEAVED, "column": Mode.COLUMN_INTERLEAVED, "checkerboard": Mode.CHECKERBOARD,
+	"sequential": Mode.SEQUENTIAL, "mono": Mode.MONO}
 
-@export var mode: Mode = Mode.HALF
+@export var mode: Mode = Mode.SBS_HALF
 @export var swap_eyes := false
 ## Eye separation as a fraction of the convergence distance (1/30 ~ 6.5 cm eyes at 2 m).
 @export var ipd_ratio := 1.0 / 30.0
@@ -27,8 +37,10 @@ var target_distance := 1000.0
 
 var _views: Array[SubViewport] = []
 var _cams: Array[Camera3D] = []
-var _rects: Array[TextureRect] = []
 var _ui_layers: Array[CanvasLayer] = []
+var _out: ColorRect
+var _mat: ShaderMaterial
+var _frame_eye := 0
 
 
 func _ready() -> void:
@@ -48,16 +60,18 @@ func _ready() -> void:
 		var ui := CanvasLayer.new()
 		vp.add_child(ui)
 		add_child(vp)
-		var tr := TextureRect.new()
-		tr.texture = vp.get_texture()
-		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		tr.stretch_mode = TextureRect.STRETCH_SCALE
-		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(tr)
 		_views.append(vp)
 		_cams.append(cam)
-		_rects.append(tr)
 		_ui_layers.append(ui)
+	_mat = ShaderMaterial.new()
+	_mat.shader = load("res://shaders/stereo_composite.gdshader")
+	_mat.set_shader_parameter("left_eye", _views[0].get_texture())
+	_mat.set_shader_parameter("right_eye", _views[1].get_texture())
+	_out = ColorRect.new()
+	_out.material = _mat
+	_out.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_out.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_out)
 	get_viewport().size_changed.connect(_layout)
 	_layout()
 
@@ -73,34 +87,33 @@ func set_mode(m: Mode) -> void:
 
 
 func cycle_mode() -> void:
-	set_mode((mode + 1) % 3 as Mode)
+	set_mode((mode + 1) % Mode.size() as Mode)
 
 
 func mode_name() -> String:
-	return ["SBS half", "SBS full", "mono"][mode]
+	return MODE_NAMES[mode]
 
 
 func _layout() -> void:
-	var win := get_viewport().get_visible_rect().size
-	if mode == Mode.MONO:
-		_views[0].size = Vector2i(win)
-		_rects[0].position = Vector2.ZERO
-		_rects[0].size = win
-		_rects[1].visible = false
-		_views[1].render_target_update_mode = SubViewport.UPDATE_DISABLED
-		return
-	_rects[1].visible = true
-	_views[1].render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	var half := Vector2(win.x * 0.5, win.y)
-	# eye frame resolution: full window res for HALF (then squeezed), half window for FULL
-	var frame := Vector2i(win) if mode == Mode.HALF else Vector2i(half)
-	for i in 2:
-		_views[i].size = frame
-		_rects[i].position = Vector2(half.x * i, 0)
-		_rects[i].size = half
+	var win := Vector2i(get_viewport().get_visible_rect().size)
+	# Each eye is rendered at the resolution it will finally be shown at, then the composite
+	# shader packs the two. Squeezed formats (SBS half / top-bottom) render full-res so the
+	# display's un-squeeze restores the correct aspect.
+	var frame := win
+	if mode == Mode.SBS_FULL:
+		frame = Vector2i(win.x / 2, win.y)
+	for vp in _views:
+		vp.size = frame
+	_views[1].render_target_update_mode = SubViewport.UPDATE_DISABLED if mode == Mode.MONO else SubViewport.UPDATE_ALWAYS
+	var pattern: int = {Mode.SBS_HALF: 0, Mode.SBS_FULL: 0, Mode.TOP_BOTTOM: 1, Mode.ROW_INTERLEAVED: 2,
+		Mode.COLUMN_INTERLEAVED: 3, Mode.CHECKERBOARD: 4, Mode.SEQUENTIAL: 5, Mode.MONO: 6}[mode]
+	_mat.set_shader_parameter("pattern", pattern)
 
 
 func _process(_dt: float) -> void:
+	if mode == Mode.SEQUENTIAL:
+		_frame_eye = 1 - _frame_eye
+		_mat.set_shader_parameter("frame_eye", _frame_eye)
 	if head == null:
 		return
 	var xf := head.global_transform

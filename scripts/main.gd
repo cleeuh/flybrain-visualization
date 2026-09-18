@@ -1,7 +1,7 @@
 extends Node
 ## Male CNS connectome viewer — glue: loads data, builds the scene, handles keys and UI.
 ##
-## Command line (after `++`):  --sbs=half|full|mono  --swap  --ipd=0.033  --conv=1.0  --fov=70
+## Command line (after `++`):  --3d=half|full|tb|rows|columns|checkerboard|sequential|mono  --swap  --ipd=0.033  --conv=1.0  --fov=70
 ##                              --width=1.2  --brightness=0.02  --rois  --no-shells  --no-rotate
 ##                              --fullscreen  --help=0  --demo  --stim="AL(R)"
 
@@ -258,7 +258,7 @@ func _update_ui() -> void:
 		t += "\n[color=#777]Tab / ⇧Tab: choose region or class   Enter: pulse   L: tonic drive   G: auto demo   P: pause   K: stop sim\n"
 		t += "drag / arrows: orbit   wheel / Q E: zoom   space: auto-rotate\n"
 		t += "1-9 0 ⇧: toggle class   `: all   B: shells   R: neuropils\n"
-		t += "T: stereo mode   X: swap eyes   [ ]: eye separation (%.3f)   - =: convergence (%.2f)\n" % [stereo.ipd_ratio, stereo.convergence_factor]
+		t += "T: 3D format   X: swap eyes   [ ]: eye separation (%.3f)   - =: convergence (%.2f)\n" % [stereo.ipd_ratio, stereo.convergence_factor]
 		t += ", .: width (%.1f)   ; \': brightness (%.3f)   N / ⇧N: step neuron   M: clear   F: fullscreen   C: save config   H: hide help[/color]" % [ribbon_width, brightness]
 	for l in legends:
 		l.text = t
@@ -305,7 +305,7 @@ func _apply_cmdline() -> void:
 		var key := kv[0]
 		var val := kv[1] if kv.size() > 1 else ""
 		match key:
-			"sbs": stereo.set_mode({"half": StereoRig.Mode.HALF, "full": StereoRig.Mode.FULL, "mono": StereoRig.Mode.MONO}.get(val, stereo.mode))
+			"sbs", "stereo", "3d": stereo.set_mode(StereoRig.MODE_KEYS.get(val, stereo.mode))
 			"ipd": stereo.ipd_ratio = float(val)
 			"conv": stereo.convergence_factor = float(val)
 			"fov": stereo.hfov_deg = float(val)
