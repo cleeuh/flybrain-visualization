@@ -100,6 +100,14 @@ func set_brightness(b: float) -> void:
 	material.set_shader_parameter("brightness", b)
 
 
+func set_activity_texture(t: Texture2D) -> void:
+	material.set_shader_parameter("activity", t)
+
+
+func set_sim_active(on: bool) -> void:
+	material.set_shader_parameter("sim_active", 1.0 if on else 0.0)
+
+
 func set_highlight(neuron_idx: int) -> void:
 	material.set_shader_parameter("highlight", float(neuron_idx))
 	material.set_shader_parameter("dim_others", 1.0 if neuron_idx < 0 else 0.15)

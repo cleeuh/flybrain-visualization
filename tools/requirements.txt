@@ -4,3 +4,4 @@ pyarrow
 requests
 trimesh
 fast-simplification
+cloud-volume

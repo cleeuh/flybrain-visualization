@@ -10,6 +10,9 @@ uniform vec4 colors[16];
 uniform float visible_groups[16];
 uniform float highlight = -1.0;   // neuron index, -1 = none
 uniform float dim_others = 1.0;   // brightness multiplier for non-highlighted neurons
+uniform sampler2D activity : filter_nearest, repeat_disable;   // 1-D, indexed by neuron id
+uniform float sim_active = 0.0;   // 1 = simulation running: rest neurons dimmed, spikes flash
+uniform float rest_level = 0.2;
 
 varying vec4 col;
 
@@ -24,6 +27,11 @@ void vertex() {
 	float nid = INSTANCE_CUSTOM.z;
 	float hl = highlight < 0.0 ? 1.0 : (abs(nid - highlight) < 0.5 ? 3.0 : dim_others);
 	col = colors[g] * (0.75 + 0.5 * jitter) * brightness * hl;
+	if (sim_active > 0.5) {
+		float a = texelFetch(activity, ivec2(int(nid + 0.5), 0), 0).r;
+		vec4 flash = (colors[g] * 2.0 + vec4(0.25)) * brightness * 2.0;
+		col = mix(col * rest_level, flash, a);
+	}
 	col.a = vis;
 
 	mat4 vp = PROJECTION_MATRIX * VIEW_MATRIX;

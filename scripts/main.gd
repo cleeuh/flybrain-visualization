@@ -3,7 +3,7 @@ extends Node
 ##
 ## Command line (after `++`):  --sbs=half|full|mono  --swap  --ipd=0.033  --conv=1.0  --fov=70
 ##                              --width=1.2  --brightness=0.02  --rois  --no-shells  --no-rotate
-##                              --fullscreen  --help=0
+##                              --fullscreen  --help=0  --demo  --stim="AL(R)"
 
 const CONFIG_PATH := "user://flyviz.cfg"
 
@@ -19,6 +19,11 @@ var help_visible := true
 var ribbon_width := 1.2
 var brightness := 0.02
 var highlight_idx := -1
+var sim: Sim
+var sim_on := false
+var roi_by_name: Dictionary = {}
+var show_rois := false
+var _stim_material: ShaderMaterial
 
 
 func _ready() -> void:
@@ -31,6 +36,13 @@ func _ready() -> void:
 	neurons.name = "Neurons"
 	scene_root.add_child(neurons)
 	neurons.load_data()
+	sim = Sim.new()
+	sim.name = "Sim"
+	add_child(sim)
+	if sim.load_data(neurons):
+		neurons.set_activity_texture(sim.texture)
+		sim.changed.connect(_on_sim_changed)
+	_stim_material = _shell_material(Color(1.0, 0.95, 0.6, 1.0), 0.12, 0.9)
 	_apply_cmdline()
 	neurons.set_width(ribbon_width)
 	neurons.set_brightness(brightness)
@@ -38,8 +50,16 @@ func _ready() -> void:
 	_update_ui()
 
 
-func _process(_dt: float) -> void:
+var _ui_timer := 0.0
+
+
+func _process(dt: float) -> void:
 	stereo.target_distance = rig.distance
+	if sim_on:
+		_ui_timer -= dt
+		if _ui_timer <= 0.0:
+			_ui_timer = 0.25
+			_update_ui()
 
 
 # --------------------------------------------------------------------------- scene
@@ -83,7 +103,6 @@ func _build_meshes() -> void:
 
 	rois = Node3D.new()
 	rois.name = "ROIs"
-	rois.visible = false
 	scene_root.add_child(rois)
 	var list = JSON.parse_string(FileAccess.get_file_as_string("res://data/rois.json"))
 	if list == null:
@@ -95,10 +114,12 @@ func _build_meshes() -> void:
 			continue
 		var mi := MeshInstance3D.new()
 		mi.name = r.name
+		mi.visible = false
 		mi.mesh = mesh
 		var hue := fmod(i * 0.618033988, 1.0)   # golden-ratio hue spread, L/R pairs adjacent
 		mi.material_override = _shell_material(Color.from_hsv(hue, 0.6, 1.0, 0.7), 0.05, 0.5)
 		rois.add_child(mi)
+		roi_by_name[r.name] = mi
 		i += 1
 	print("ROIs: %d neuropil meshes" % i)
 
@@ -116,7 +137,7 @@ func _unhandled_key_input(e: InputEvent) -> void:
 		KEY_H: help_visible = not help_visible
 		KEY_SPACE: rig.auto_rotate = not rig.auto_rotate
 		KEY_B: shells.visible = not shells.visible
-		KEY_R: rois.visible = not rois.visible
+		KEY_R: show_rois = not show_rois; _refresh_rois()
 		KEY_T: stereo.cycle_mode()
 		KEY_X: stereo.swap_eyes = not stereo.swap_eyes
 		KEY_BRACKETLEFT: stereo.ipd_ratio = maxf(stereo.ipd_ratio / 1.15, 0.001)
@@ -130,6 +151,12 @@ func _unhandled_key_input(e: InputEvent) -> void:
 		KEY_N: _step_highlight(-1 if shift else 1)
 		KEY_M: highlight_idx = -1; neurons.set_highlight(-1)
 		KEY_C: _save_config()
+		KEY_TAB: sim.select_target(-1 if shift else 1)
+		KEY_ENTER, KEY_KP_ENTER: _set_sim(true); sim.pulse()
+		KEY_L: _set_sim(true); sim.tonic = not sim.tonic
+		KEY_G: _set_sim(true); sim.auto_demo = not sim.auto_demo
+		KEY_P: sim.paused = not sim.paused
+		KEY_K: sim.reset(); sim.auto_demo = false; _set_sim(false)
 		KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
 			var n := (k - KEY_0 + 9) % 10          # 1..9 -> 0..8, 0 -> 9
 			if shift:
@@ -144,6 +171,32 @@ func _unhandled_key_input(e: InputEvent) -> void:
 			neurons.set_all_visible(any_hidden)
 		_:
 			return
+	_update_ui()
+
+
+func _set_sim(on: bool) -> void:
+	if not sim.loaded:
+		return
+	sim_on = on
+	neurons.set_sim_active(on)
+	_on_sim_changed()
+
+
+## Neuropil meshes: all shown when show_rois, the stimulation target always (highlighted).
+func _refresh_rois() -> void:
+	var t := sim.target() if sim.loaded else {}
+	for name in roi_by_name:
+		var mi: MeshInstance3D = roi_by_name[name]
+		var is_target: bool = sim_on and t.get("kind", "") == "region" and t.name == name
+		mi.visible = show_rois or is_target
+		if is_target:
+			mi.material_override = _stim_material
+		elif mi.material_override == _stim_material:
+			mi.material_override = _shell_material(Color.from_hsv(fmod(mi.get_index() * 0.618033988, 1.0), 0.6, 1.0, 0.7), 0.05, 0.5)
+
+
+func _on_sim_changed() -> void:
+	_refresh_rois()
 	_update_ui()
 
 
@@ -192,11 +245,18 @@ func _update_ui() -> void:
 		t += "[color=#%s]%s[/color] [color=#666]%s[/color] %s [color=#666](%d)[/color]\n" % [
 			c.to_html(false) if on else "444", "■" if on else "□", key, name, int(g.count)]
 		i += 1
+	if sim.loaded:
+		var tg := sim.target()
+		t += "\n[b]stimulate:[/b] [color=#ffe]%s[/color] [color=#888](%s, %d neurons)[/color]" % [tg.name, tg.kind, tg.members.size()]
+		if sim_on:
+			t += "   [color=#8f8]%s%s%.0f spikes/s[/color]" % ["tonic · " if sim.tonic else "", "auto · " if sim.auto_demo else "", sim.spikes_per_s]
+		t += "\n"
 	if highlight_idx >= 0:
 		var n = neurons.index[highlight_idx]
 		t += "\n[color=#fff]highlight:[/color] body %d  %s  [%s]\n" % [int(n.bodyId), str(n.type), neurons.groups[int(n.group)].name]
 	if help_visible:
-		t += "\n[color=#777]drag / arrows: orbit   wheel / Q E: zoom   space: auto-rotate\n"
+		t += "\n[color=#777]Tab / ⇧Tab: choose region or class   Enter: pulse   L: tonic drive   G: auto demo   P: pause   K: stop sim\n"
+		t += "drag / arrows: orbit   wheel / Q E: zoom   space: auto-rotate\n"
 		t += "1-9 0 ⇧: toggle class   `: all   B: shells   R: neuropils\n"
 		t += "T: stereo mode   X: swap eyes   [ ]: eye separation (%.3f)   - =: convergence (%.2f)\n" % [stereo.ipd_ratio, stereo.convergence_factor]
 		t += ", .: width (%.1f)   ; \': brightness (%.3f)   N / ⇧N: step neuron   M: clear   F: fullscreen   C: save config   H: hide help[/color]" % [ribbon_width, brightness]
@@ -253,7 +313,14 @@ func _apply_cmdline() -> void:
 			"brightness": brightness = float(val)
 			"swap": stereo.swap_eyes = true
 			"no-rotate": rig.auto_rotate = false
-			"rois": rois.visible = true
+			"rois": show_rois = true; _refresh_rois()
+			"demo": _set_sim(true); sim.auto_demo = true
+			"simon": _set_sim(true)
+			"stim":
+				for i in sim.targets.size():
+					if sim.targets[i].name == val:
+						sim.target_idx = i
+				_set_sim(true); sim.pulse()
 			"no-shells": shells.visible = false
 			"fullscreen": get_window().mode = Window.MODE_FULLSCREEN
 			"help": help_visible = val != "0"
