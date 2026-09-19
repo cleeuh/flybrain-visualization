@@ -1,7 +1,9 @@
 extends Node
 ## Male CNS connectome viewer — glue: loads data, builds the scene, handles keys and UI.
 ##
-## Command line (after `++`):  --3d=half|full|tb|rows|columns|checkerboard|sequential|mono  --swap  --ipd=0.033  --conv=1.0  --fov=70
+## Command line (after `++`):  --3d=half|full|tb|rows|columns|checkerboard|sequential|wall|mono  --swap
+##                              --wall  --wall-size=6.047x2.042  --wall-distance=2.282  --wall-eye=0.063  --wall-res=4800x1620
+## satwatch2-compatible:         -- --stereo [4800 1620] [--swap-eyes]  --ipd=0.033  --conv=1.0  --fov=70
 ##                              --width=1.2  --brightness=0.02  --rois  --no-shells  --no-rotate
 ##                              --fullscreen  --help=0  --demo  --stim="AL(R)"
 
@@ -51,10 +53,17 @@ func _ready() -> void:
 
 
 var _ui_timer := 0.0
+var _shot_path := ""
+var _shot_timer := 0.0
 
 
 func _process(dt: float) -> void:
 	stereo.target_distance = rig.distance
+	if _shot_path != "":
+		_shot_timer -= dt
+		if _shot_timer <= 0.0:
+			_save_screenshot(_shot_path)
+			get_tree().quit()
 	if sim_on:
 		_ui_timer -= dt
 		if _ui_timer <= 0.0:
@@ -134,6 +143,7 @@ func _unhandled_key_input(e: InputEvent) -> void:
 	match k:
 		KEY_ESCAPE: get_tree().quit()
 		KEY_F11, KEY_F: _toggle_fullscreen()
+		KEY_F12: _save_screenshot("user://screenshot_%s.png" % Time.get_datetime_string_from_system().replace(":", "-"))
 		KEY_H: help_visible = not help_visible
 		KEY_SPACE: rig.auto_rotate = not rig.auto_rotate
 		KEY_B: shells.visible = not shells.visible
@@ -207,6 +217,13 @@ func _step_highlight(dir: int) -> void:
 	neurons.set_highlight(highlight_idx)
 
 
+func _save_screenshot(path: String) -> void:
+	await RenderingServer.frame_post_draw
+	var img := get_viewport().get_texture().get_image()
+	img.save_png(path)
+	print("screenshot %dx%d saved to %s" % [img.get_width(), img.get_height(), ProjectSettings.globalize_path(path)])
+
+
 func _toggle_fullscreen() -> void:
 	var w := get_window()
 	if w.mode == Window.MODE_FULLSCREEN or w.mode == Window.MODE_EXCLUSIVE_FULLSCREEN:
@@ -233,9 +250,16 @@ func _build_ui() -> void:
 
 
 func _update_ui() -> void:
+	for layer in stereo.ui_layers():
+		var vp := layer.get_viewport()
+		layer.scale = Vector2.ONE * maxf(vp.size.y / 1080.0, 0.5) if vp else Vector2.ONE
 	var t := "[b]Drosophila male CNS connectome[/b]  [color=#888](FlyEM / Janelia, male-cns v1.0, CC-BY)[/color]\n"
 	t += "[color=#aaa]%d neurons · %d skeleton segments · %s%s[/color]\n\n" % [
 		neurons.index.size(), neurons.segment_count, stereo.mode_name(), "  (eyes swapped)" if stereo.swap_eyes else ""]
+	if stereo.mode == StereoRig.Mode.WALL:
+		t += "[color=#aaa]wall %.2f × %.2f m at %.2f m, eyes %.0f mm, %d×%d per eye · 1 mm = %.1f µm[/color]\n" % [
+			stereo.wall_width, stereo.wall_height, stereo.wall_distance, stereo.wall_eye_separation * 1000,
+			stereo.wall_eye_width, stereo.wall_eye_height, stereo.wall_units_per_metre() / 1000.0]
 	var i := 0
 	for g in neurons.groups:
 		var on: bool = neurons.group_visible[int(g.id)] > 0.5
@@ -275,12 +299,20 @@ func _load_config() -> void:
 	stereo.ipd_ratio = cfg.get_value("stereo", "ipd_ratio", stereo.ipd_ratio)
 	stereo.convergence_factor = cfg.get_value("stereo", "convergence_factor", stereo.convergence_factor)
 	stereo.hfov_deg = cfg.get_value("stereo", "hfov_deg", stereo.hfov_deg)
+	stereo.wall_width = cfg.get_value("wall", "width_m", stereo.wall_width)
+	stereo.wall_height = cfg.get_value("wall", "height_m", stereo.wall_height)
+	stereo.wall_distance = cfg.get_value("wall", "distance_m", stereo.wall_distance)
+	stereo.wall_eye_separation = cfg.get_value("wall", "eye_separation_m", stereo.wall_eye_separation)
+	stereo.wall_eye_width = cfg.get_value("wall", "eye_width_px", stereo.wall_eye_width)
+	stereo.wall_eye_height = cfg.get_value("wall", "eye_height_px", stereo.wall_eye_height)
 	ribbon_width = cfg.get_value("view", "ribbon_width", ribbon_width)
 	brightness = cfg.get_value("view", "brightness", brightness)
 	rig.auto_rotate = cfg.get_value("view", "auto_rotate", rig.auto_rotate)
 	rig.auto_rotate_speed = cfg.get_value("view", "auto_rotate_speed", rig.auto_rotate_speed)
 	help_visible = cfg.get_value("view", "help", help_visible)
 	stereo.set_mode(stereo.mode)
+	if stereo.mode == StereoRig.Mode.WALL:
+		stereo.apply_wall_window()
 
 
 func _save_config() -> void:
@@ -290,6 +322,12 @@ func _save_config() -> void:
 	cfg.set_value("stereo", "ipd_ratio", stereo.ipd_ratio)
 	cfg.set_value("stereo", "convergence_factor", stereo.convergence_factor)
 	cfg.set_value("stereo", "hfov_deg", stereo.hfov_deg)
+	cfg.set_value("wall", "width_m", stereo.wall_width)
+	cfg.set_value("wall", "height_m", stereo.wall_height)
+	cfg.set_value("wall", "distance_m", stereo.wall_distance)
+	cfg.set_value("wall", "eye_separation_m", stereo.wall_eye_separation)
+	cfg.set_value("wall", "eye_width_px", stereo.wall_eye_width)
+	cfg.set_value("wall", "eye_height_px", stereo.wall_eye_height)
 	cfg.set_value("view", "ribbon_width", ribbon_width)
 	cfg.set_value("view", "brightness", brightness)
 	cfg.set_value("view", "auto_rotate", rig.auto_rotate)
@@ -300,12 +338,29 @@ func _save_config() -> void:
 
 
 func _apply_cmdline() -> void:
-	for arg in OS.get_cmdline_user_args():
+	var args := OS.get_cmdline_user_args()
+	# satwatch2 / stereo_wall_display convention:  -- --stereo [W H] [--swap-eyes]
+	var si := args.find("--stereo")
+	if si >= 0:
+		stereo.set_mode(StereoRig.Mode.WALL)
+		if si + 2 < args.size() and args[si + 1].is_valid_int():
+			stereo.wall_eye_width = int(args[si + 1])
+			stereo.wall_eye_height = int(args[si + 2])
+	if args.has("--swap-eyes"):
+		stereo.swap_eyes = true
+	for arg in args:
 		var kv := arg.trim_prefix("--").split("=", true, 1)
 		var key := kv[0]
 		var val := kv[1] if kv.size() > 1 else ""
 		match key:
 			"sbs", "stereo", "3d": stereo.set_mode(StereoRig.MODE_KEYS.get(val, stereo.mode))
+			"wall": stereo.set_mode(StereoRig.Mode.WALL)
+			"wall-size":   # metres, e.g. --wall-size=6.047x2.042
+				var p := val.split("x"); stereo.wall_width = float(p[0]); stereo.wall_height = float(p[1])
+			"wall-distance": stereo.wall_distance = float(val)
+			"wall-eye": stereo.wall_eye_separation = float(val)
+			"wall-res":    # pixels per eye, e.g. --wall-res=4800x1620
+				var p := val.split("x"); stereo.wall_eye_width = int(p[0]); stereo.wall_eye_height = int(p[1])
 			"ipd": stereo.ipd_ratio = float(val)
 			"conv": stereo.convergence_factor = float(val)
 			"fov": stereo.hfov_deg = float(val)
@@ -324,3 +379,6 @@ func _apply_cmdline() -> void:
 			"no-shells": shells.visible = false
 			"fullscreen": get_window().mode = Window.MODE_FULLSCREEN
 			"help": help_visible = val != "0"
+			"screenshot": _shot_path = val; _shot_timer = 2.0   # save after 2 s and quit
+	if stereo.mode == StereoRig.Mode.WALL:
+		stereo.apply_wall_window()

@@ -38,9 +38,10 @@ if [ "$want" = all ] || [ "$want" = linux ]; then
 fi
 if [ "$want" = all ] || [ "$want" = windows ]; then
     echo ">> Windows"
-    "$GODOT" --headless --path . --export-release Windows build/godot-fly.exe 2>&1 | grep -iE "error|warn" || true
+    "$GODOT" --headless --path . --export-release "Wall (Windows)" build/godot-fly.exe 2>&1 | grep -iE "error|warn" || true
 fi
 
 echo ">> build/:"
 ls -lh build/ | tail -n +2
-echo "Ship the executable together with godot-fly.pck.  Run:  godot-fly.exe ++ --3d=half --fullscreen --demo"
+echo "Windows: godot-fly.exe is self-contained (embedded pck).  Linux: ship godot-fly.x86_64 with godot-fly.pck."
+echo "Wall:    godot-fly.exe -- --stereo 4800 1620 --demo"
