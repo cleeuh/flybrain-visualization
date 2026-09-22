@@ -13,11 +13,15 @@ extends Node
 ##   abbr      neuropil abbreviations quoted in the text
 ##   body      narration (bbcode)
 ##   rois      neuropil base names; "(L)" / "(R)" variants are added automatically
-##   focus     "cns" | "brain" | "vnc" | "rois" (frame the slide's ROIs) — default "rois"
+##   focus     "fly" | "cns" | "brain" | "vnc" | "rois" (frame the slide's ROIs) — default "rois"
 ##   shell     outer shell opacity 0..1 (1 = as in free-flight mode, 0 = fully transparent)
+##   fly       opacity of the stylised whole fly, 0..1 (default 0)
+##   hover     true to let the fly hover and flap; false / omitted parks it on the CNS
+##   neurons   false to hide the neuron ribbons (default true)
 ##   yaw/pitch camera angles in degrees
 ##   zoom      padding on the computed framing distance (>1 pulls back, <1 crops in)
 ##   classes   neuron superclasses to show; omitted / empty = all
+##   credits   true on the closing slide: appends CREDITS and the restart / explore choice
 
 const SHELL_BASE_ALPHA := 0.25
 const ROI_ALPHA := 0.75   ## lit neuropil opacity, scaled down when a slide lights many
@@ -28,15 +32,27 @@ const VIEW_SHIFT := 0.16
 
 const SLIDES: Array[Dictionary] = [
 	{
-		"title": "The fly",
+		"title": "The Fruit Fly",
 		"sci": "Drosophila melanogaster (Meigen, 1830)",
-		"abbr": "male-cns v1.0",
-		"body": "Two and a half millimetres of animal, about 140 000 neurons. Everything it does — "
-			+ "walking, flying, courting, feeding — runs on the nervous system in front of you: a "
-			+ "brain in the head and a ventral nerve cord in the thorax, joined by the neck connective.\n\n"
-			+ "This is the whole reconstructed central nervous system, every skeleton traced from "
-			+ "electron microscopy. We start wide, then go in.",
-		"focus": "cns", "shell": 1.0, "yaw": 20.0, "pitch": -12.0, "zoom": 1.25,
+		"abbr": "≈ 2.5 mm · ≈ 140 000 neurons",
+		"body": "Two and a half millimetres of animal, hovering in front of you. It walks, flies, "
+			+ "courts, learns and remembers, tastes with its feet and hears with its antennae.\n\n"
+			+ "A century of genetics has made it the animal we understand best — and the first one "
+			+ "whose entire nervous system has been traced, neuron by neuron, from electron "
+			+ "microscopy.",
+		"focus": "fly", "fly": 1.0, "neurons": false, "shell": 0.0,
+		"yaw": 200.0, "pitch": -10.0, "zoom": 1.2, "hover": true,
+	},
+	{
+		"title": "The nervous system inside",
+		"sci": "Systema nervosum centrale",
+		"abbr": "brain + ventral nerve cord",
+		"body": "The body turns to glass. What is left is everything the fly does its thinking "
+			+ "with: a brain filling the head and a ventral nerve cord running through the thorax, "
+			+ "joined by the neck connective.\n\n"
+			+ "Every line here is a real, reconstructed neuron, placed where it sits in the animal.",
+		# same camera angle as the fly slide, so the body dissolves in place before we move
+		"focus": "cns", "fly": 0.0, "shell": 1.0, "yaw": 200.0, "pitch": -10.0, "zoom": 1.25,
 	},
 	{
 		"title": "Into the brain",
@@ -158,14 +174,18 @@ const SLIDES: Array[Dictionary] = [
 	{
 		"title": "One nervous system",
 		"sci": "Drosophila melanogaster — male CNS connectome v1.0",
-		"abbr": "FlyEM / Janelia · CC-BY 4.0",
 		"body": "Back out to the whole animal. Smell, sight, hearing, memory, a compass and six legs, "
-			+ "all in a volume smaller than a poppy seed — and all of it now traced synapse by synapse.\n\n"
-			+ "[color=#8f8]Press → once more, or V, to leave the tour and fly the connectome yourself:[/color] "
-			+ "drag or A/D/W/S to orbit, Tab to pick a region, Enter to stimulate it and watch the "
-			+ "activity spread.",
-		"focus": "cns", "shell": 1.0, "yaw": -25.0, "pitch": -15.0, "zoom": 1.25,
+			+ "all in a volume smaller than a poppy seed — and all of it now traced synapse by synapse.",
+		"focus": "cns", "shell": 1.0, "yaw": -25.0, "pitch": -15.0, "zoom": 1.25, "credits": true,
 	},
+]
+
+## Shown on the closing slide — the only place the dataset and tooling are credited.
+const CREDITS := [
+	["Data", "FlyEM / Janelia male adult CNS connectome, male-cns v1.0 (CC-BY 4.0)"],
+	["", "male-cns.janelia.org/download"],
+	["Rendering", "Godot 4.7 · additive screen-space ribbons, one MultiMesh"],
+	["Stereo", "off-axis side-by-side; powerwall projection from addons/stereo_wall_display (UH LAVA, MIT)"],
 ]
 
 signal changed
@@ -176,6 +196,7 @@ var index := 0
 var _rig: OrbitRig
 var _stereo: StereoRig
 var _neurons: Neurons
+var _fly: Fly
 var _shell_mats: Array[ShaderMaterial] = []
 var _rois: Dictionary = {}            # name -> MeshInstance3D
 var _roi_mats: Dictionary = {}        # name -> story material (created lazily)
@@ -187,10 +208,11 @@ var _tween: Tween
 var _saved := {}
 
 
-func setup(rig: OrbitRig, stereo: StereoRig, neurons: Neurons, shell_nodes: Array[MeshInstance3D],
-		roi_by_name: Dictionary) -> void:
+func setup(rig: OrbitRig, stereo: StereoRig, neurons: Neurons, fly: Fly,
+		shell_nodes: Array[MeshInstance3D], roi_by_name: Dictionary) -> void:
 	_rig = rig
 	_stereo = stereo
+	_fly = fly
 	_neurons = neurons
 	_shell_nodes = shell_nodes
 	_shell_mats.clear()
@@ -229,6 +251,9 @@ func stop() -> void:
 	_kill_tween()
 	for m in _shell_mats:
 		_set_alpha(SHELL_BASE_ALPHA, m)
+	_fly.flying = false
+	_fly.set_alpha(0.0)
+	_neurons.visible = true
 	for name in _lit:
 		_unlight(name)
 	_lit.clear()
@@ -251,6 +276,14 @@ func step(dir: int) -> void:
 		return
 	index = n
 	_apply()
+
+
+## Back to the first slide (the closing slide offers this).
+func restart() -> void:
+	if active:
+		goto_slide(0)
+	else:
+		start(0)
 
 
 func goto_slide(i: int) -> void:
@@ -293,6 +326,11 @@ func _apply() -> void:
 		_tween.tween_method(_set_alpha.bind(m), _alpha(m), roi_a, FLY_SECONDS)
 	_lit = want
 
+	# the stylised body, and whether the connectome itself is drawn at all
+	_tween.tween_method(_fly.set_alpha, _fly.alpha(), float(s.get("fly", 0.0)), FLY_SECONDS)
+	_fly.flying = bool(s.get("hover", false))
+	_neurons.visible = bool(s.get("neurons", true))
+
 	# neuron superclasses
 	var classes: Array = s.get("classes", [])
 	for g in _neurons.groups:
@@ -330,6 +368,8 @@ func _framing_distance(box: AABB, yaw: float, pitch: float, pad: float) -> float
 ## World-space box the slide wants framed.
 func _focus_aabb(s: Dictionary, lit: Array[String]) -> AABB:
 	match String(s.get("focus", "rois")):
+		"fly":
+			return _fly.global_transform * _fly.rest_aabb()
 		"cns":
 			return _shell_aabb(["brain_shell", "vnc_shell"])
 		"brain":
@@ -419,8 +459,28 @@ func panel_text() -> String:
 	if s.has("abbr"):
 		t += "[color=#e8c27a]%s[/color]\n" % s.abbr
 	t += "\n%s\n" % s.body
+	if s.get("credits", false):
+		t += _credits_text()
 	t += "\n[color=#666]%s[/color]\n" % _progress_bar()
-	t += "[color=#777]← → slides   V: leave tour[/color]"
+	if s.get("credits", false):
+		t += "[color=#8f8]R: start over[/color]   [color=#8f8]→ or V: explore it yourself[/color]"
+	else:
+		t += "[color=#777]← → slides   R: start over   V: explore[/color]"
+	return t
+
+
+## The attributions live here, on the closing slide, rather than on screen the whole time.
+func _credits_text() -> String:
+	var t := "\n[color=#7fd4ff]─────────────[/color]\n"
+	t += "[color=#aaa]%d neurons · %d skeleton segments rendered[/color]\n\n" % [
+		_neurons.index.size(), _neurons.segment_count]
+	for c in CREDITS:
+		if c[0] == "":
+			t += "[color=#888]%s[/color]\n" % c[1]
+		else:
+			t += "[color=#e8c27a]%s[/color]  [color=#aaa]%s[/color]\n" % [c[0], c[1]]
+	t += "\n[color=#888]Explore mode: drag or A/D/W/S to orbit, Q/E to zoom, Tab to pick a region, "
+	t += "Enter to stimulate it and watch activity spread across the real synaptic graph.[/color]\n"
 	return t
 
 

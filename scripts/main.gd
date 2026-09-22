@@ -1,7 +1,7 @@
 extends Node
 ## Male CNS connectome viewer — glue: loads data, builds the scene, handles keys and UI.
 ##
-## Command line (after `++`):  --3d=half|full|wall|mono  --swap  --story[=N]
+## Command line (after `++`):  --3d=half|full|wall|mono  --swap  --story[=N] / --no-story
 ##                              --wall  --wall-size=6.047x2.042  --wall-distance=2.282  --wall-eye=0.063  --wall-res=4800x1620
 ## satwatch2-compatible:         -- --stereo [4800 1620] [--swap-eyes]  --ipd=0.033  --conv=1.0  --fov=70
 ##                              --width=1.2  --brightness=0.02  --rois  --no-shells  --no-rotate
@@ -17,6 +17,7 @@ var neurons: Neurons
 var shells: Node3D
 var shell_nodes: Array[MeshInstance3D] = []
 var story: Story
+var fly: Fly
 var story_panels: Array[PanelContainer] = []
 var story_labels: Array[RichTextLabel] = []
 var rois: Node3D
@@ -30,6 +31,7 @@ var sim_on := false
 var roi_by_name: Dictionary = {}
 var show_rois := false
 var _stim_material: ShaderMaterial
+var _story_on_start := true
 
 
 func _ready() -> void:
@@ -52,9 +54,11 @@ func _ready() -> void:
 	story = Story.new()
 	story.name = "Story"
 	add_child(story)
-	story.setup(rig, stereo, neurons, shell_nodes, roi_by_name)
+	story.setup(rig, stereo, neurons, fly, shell_nodes, roi_by_name)
 	story.changed.connect(_update_ui)
 	_apply_cmdline()
+	if _story_on_start and not story.active:
+		story.start()                    # the tour is the default entry point (--no-story skips it)
 	neurons.set_width(ribbon_width)
 	neurons.set_brightness(brightness)
 	_build_ui()
@@ -123,6 +127,10 @@ func _build_meshes() -> void:
 		shells.add_child(mi)
 		shell_nodes.append(mi)
 
+	fly = Fly.new()
+	fly.name = "Fly"
+	scene_root.add_child(fly)
+
 	rois = Node3D.new()
 	rois.name = "ROIs"
 	scene_root.add_child(rois)
@@ -165,7 +173,11 @@ func _unhandled_key_input(e: InputEvent) -> void:
 		KEY_H: help_visible = not help_visible
 		KEY_SPACE: rig.auto_rotate = not rig.auto_rotate
 		KEY_B: shells.visible = not shells.visible
-		KEY_R: show_rois = not show_rois; _refresh_rois()
+		KEY_R:
+			if story.active:
+				story.restart()
+			else:
+				show_rois = not show_rois; _refresh_rois()
 		KEY_T: stereo.cycle_mode()
 		KEY_X: stereo.swap_eyes = not stereo.swap_eyes
 		KEY_BRACKETLEFT: stereo.ipd_ratio = maxf(stereo.ipd_ratio / 1.15, 0.001)
@@ -335,16 +347,11 @@ func _update_ui() -> void:
 		layer.scale = Vector2.ONE * maxf(vp.size.y / 1080.0, 0.5) if vp else Vector2.ONE
 	_update_story_panels()
 	if story.active:
-		# the tour owns the screen: left side keeps only the dataset line and the key hints
-		var s := "[b]Drosophila male CNS connectome[/b]  [color=#888](FlyEM / Janelia, male-cns v1.0, CC-BY)[/color]\n"
-		s += "[color=#aaa]%d neurons · %d skeleton segments · %s[/color]\n" % [
-			neurons.index.size(), neurons.segment_count, stereo.mode_name()]
-		if help_visible:
-			s += "\n[color=#777]← →: slides   V: leave tour   drag / WASD: look   Q E: zoom   H: hide help[/color]"
+		# the tour owns the screen: everything, credits included, is in the panel on the right
 		for l in legends:
-			l.text = s
+			l.text = ""
 		return
-	var t := "[b]Drosophila male CNS connectome[/b]  [color=#888](FlyEM / Janelia, male-cns v1.0, CC-BY)[/color]\n"
+	var t := "[b]Drosophila male CNS connectome[/b]\n"
 	t += "[color=#aaa]%d neurons · %d skeleton segments · %s%s[/color]\n\n" % [
 		neurons.index.size(), neurons.segment_count, stereo.mode_name(), "  (eyes swapped)" if stereo.swap_eyes else ""]
 	if stereo.mode == StereoRig.Mode.WALL:
@@ -375,7 +382,7 @@ func _update_ui() -> void:
 		t += "1-9 0 ⇧: toggle class   `: all   B: shells   R: neuropils\n"
 		t += "T: 3D format   X: swap eyes   [ ]: eye separation (%.3f)   - =: convergence (%.2f)\n" % [stereo.ipd_ratio, stereo.convergence_factor]
 		t += ", .: width (%.1f)   ; \': brightness (%.3f)   N / ⇧N: step neuron   M: clear   F: fullscreen   C: save config   H: hide help\n" % [ribbon_width, brightness]
-		t += "V: guided tour of the brain (← → to step through it)[/color]"
+		t += "V: guided tour of the brain (← → to step through it; its last slide has the credits)[/color]"
 	for l in legends:
 		l.text = t
 
@@ -471,6 +478,7 @@ func _apply_cmdline() -> void:
 				_set_sim(true); sim.pulse()
 			"no-shells": shells.visible = false
 			"story": story.start(int(val) - 1 if val.is_valid_int() else 0)
+			"no-story": _story_on_start = false
 			"fullscreen": get_window().mode = Window.MODE_FULLSCREEN
 			"windowed": get_window().mode = Window.MODE_WINDOWED
 			"help": help_visible = val != "0"

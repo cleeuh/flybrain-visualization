@@ -16,15 +16,25 @@ Data: https://male-cns.janelia.org/download/ (CC-BY 4.0).
 
 ## Guided tour (`V`, or `--story`)
 
-Press **V** for a narrated slide tour of the nervous system, stepped with the **← / →**
-arrow keys (they navigate slides instead of orbiting while the tour is up). It opens on the
-whole CNS, flies into the head while the outer shell fades to fully transparent, then visits
+**The app starts in the tour** (`--no-story` to boot straight into free flight, `V` to leave
+or re-enter it). It is a narrated slide sequence stepped with the **← / →** arrow keys,
+which navigate slides instead of orbiting while it is up. It opens on the
+fly itself — a stylised whole animal hovering with its wings flapping — then dissolves the
+body to reveal the nervous system inside it, flies into the head while the outer shell fades
+to fully transparent, and visits
 one region per slide — optic lobes, antennal lobe, mushroom body, lateral horn, central
 complex, AMMC/wedge, gnathal ganglia, the neck connective and the ventral nerve cord —
 lighting that region's neuropil meshes, framing them, and showing only the relevant neuron
 superclasses. The narration (title, formal name, abbreviations, description) sits in a panel
-down the right-hand edge, drawn in both eyes at zero parallax. Stepping past either end, or
-pressing `V` again, hands control back to free flight.
+down the right-hand edge, drawn in both eyes at zero parallax — nothing else is drawn over
+the scene while the tour runs. The closing slide carries the credits (dataset, licence,
+rendering and stereo attributions) and offers **R** to start over or **→ / V** to go into
+explore mode. `R` restarts the tour from any slide.
+
+The opening fly is [`scripts/fly.gd`](scripts/fly.gd): the connectome data is nervous system
+only, so the body is built procedurally from scaled spheres and cylinders in the same shell
+shader, laid out in the data's own coordinates so the brain sits inside the head and the
+nerve cord inside the thorax — which is what makes the dissolve line up.
 
 Slides are plain data at the top of [`scripts/story.gd`](scripts/story.gd) — edit `SLIDES`
 to re-order, re-word or add regions (`rois` takes neuropil names as in `data/rois.json`,
@@ -90,15 +100,16 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
    Other flags: `--swap` `--ipd=0.033` `--conv=1.0` `--fov=70` `--width=1.2`
    `--brightness=0.02` `--rois` `--no-shells` `--no-rotate` `--help=0`
    `--demo` (auto-stimulate random regions) `--stim="AL(R)"` (pulse a region at start)
-   `--story` / `--story=5` (start in the guided tour).
+   `--no-story` (skip the guided tour at startup) / `--story=5` (start it at slide 5).
    Press `C` to save the current settings to `user://flyviz.cfg` (loaded on start).
 
 ## Controls
 
 | key | action |
 |---|---|
-| V | guided tour of the brain |
+| V | guided tour of the brain (on by default) — leave / re-enter |
 | ← → | previous / next slide (during the tour) |
+| R | restart the tour (neuropil ROIs outside it) |
 | Tab / ⇧Tab | choose stimulation target (neuropil or class) |
 | Enter | pulse the target |
 | L / G / P / K | tonic drive / auto demo / pause / stop simulation |
@@ -106,7 +117,7 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
 | wheel / Q E | zoom |
 | space | auto-rotate |
 | 1-9 0, ⇧1-4 | toggle neuron class; `` ` `` all |
-| B / R | brain+VNC shells / neuropil ROIs |
+| B | brain + VNC shells |
 | T | cycle 3D format (SBS half → SBS full → wall → mono) |
 | F12 | screenshot to `user://` |
 | X | swap eyes |
@@ -183,6 +194,7 @@ scripts/stereo_rig.gd  stereo cameras + output packing (SBS half / full / wall)
 shaders/stereo_composite.gdshader   packs the two eye renders into the display's format
 addons/stereo_wall_display/         vendored UH LAVA powerwall addon (MIT); wall mode uses its projection
 scripts/story.gd       guided slide tour: slide data, region framing, shell / neuropil fades
+scripts/fly.gd         procedural stylised fly for the opening slide (hover + wing flap)
 scripts/orbit.gd       orbit camera (animated pivot, so the tour can fly into a region)
 scripts/main.gd        glue, input, legend, config
 ```
