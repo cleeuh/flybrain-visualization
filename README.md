@@ -87,11 +87,10 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
    godot --path . ++ --3d=full                        # window two frames wide, full-res per eye
    godot --path . ++ --3d=mono                        # plain 3D
    godot --path . ++ --3d=half --windowed             # don't start fullscreen
+   godot --path . ++ --3d=wall                        # powerwall, geometry from the config
 
-   godot --path . ++ --wall --demo                    # UH LAVA powerwall (see below)
-   godot --path . -- --stereo 4800 1620 --demo        # same, satwatch2-style flags
-
-   All formats: `half` `full` `wall` `mono`. The window starts fullscreen (`--windowed` to
+   All formats: `half` `full` `wall` `mono`; the wall's physical geometry comes from the
+   config file (see below), not from flags. The window starts fullscreen (`--windowed` to
    opt out; `--fullscreen` is still accepted).
    If a wall's menu says "single 3D" it takes one input carrying both eyes — pick the packing
    named in that menu. `X` swaps eyes if the depth looks inside-out.
@@ -131,29 +130,37 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
 | C | save config |
 | Esc | quit |
 
-## Powerwall mode (`--wall`)
+## Powerwall mode
 
 For walls driven as two full-resolution eye images side by side — the setup of
 [`addons/stereo_wall_display`](addons/stereo_wall_display) (UH LAVA lab, MIT), whose
 off-axis projection and wall geometry this mode reuses. It opens a borderless window at
 (0,0) of `2 × eye width` by `eye height` and derives each eye's frustum from the physical
 wall size, viewer distance and eye separation, so depth is geometrically correct for a
-viewer standing at the design position. Defaults are the LAVA wall:
+viewer standing at the design position.
 
-| flag | default | meaning |
-|---|---|---|
-| `--wall-size=WxH` | `6.047x2.042` | wall size in metres |
-| `--wall-distance=D` | `2.282` | viewer to wall, metres |
-| `--wall-eye=E` | `0.063` | eye separation, metres |
-| `--wall-res=WxH` | `4800x1620` | pixels per eye (window is 9600×1620) |
+**Setting it up is configuration, not launch flags:** press `T` until the format reads
+`wall`, press `C` to write `user://flyviz.cfg`, then edit the `[wall]` section and restart —
+the wall window and frustums are applied on start. Defaults are the LAVA wall:
 
-Project settings follow satwatch2's wall deployment: `rendering_device/driver.windows="d3d12"`,
-and the **Wall (Windows)** export preset embeds the PCK into a single `.exe` with BPTC textures.
-`-- --stereo [W H]` and `--swap-eyes` are accepted for parity with that project.
+```ini
+[wall]
+width_m=6.047          ; wall size in metres
+height_m=2.042
+distance_m=2.282       ; viewer to wall
+eye_separation_m=0.063
+eye_width_px=4800      ; pixels per eye (the window is 9600x1620)
+eye_height_px=1620
+```
+
+On Windows the config lives in `%APPDATA%\Godot\app_userdata\godot-fly\flyviz.cfg`, on
+Linux in `~/.local/share/godot/app_userdata/godot-fly/`. Project settings follow satwatch2's
+wall deployment (`rendering_device/driver.windows="d3d12"`), and the Windows export preset
+uses BPTC textures.
 
 The orbit target (the CNS centre) always sits on the wall plane, so zooming (`Q`/`E`,
 wheel) rescales the fly rather than moving through it; the legend shows the current scale
-(`1 mm on the wall = … µm`). Press `C` to save the wall settings to the config file.
+(`1 mm on the wall = … µm`). Press `C` again to save any changes back to the config file.
 `F12` saves a screenshot of the full output frame; `--screenshot=path` does so after 2 s and quits.
 
 `display/window/stretch/mode` must stay `disabled` (it is) — any stretch mode rescales the
@@ -162,13 +169,19 @@ eye compositing against the base resolution.
 ## Building a standalone executable
 
 ```sh
-./export.sh            # build/godot-fly.exe (self-contained) + build/godot-fly.x86_64 + godot-fly.pck
+./export.sh            # build/godot-fly.exe + build/godot-fly.x86_64, both self-contained
 ./export.sh windows    # one platform
 ```
 
-Installs the matching export templates on first run. The Windows exe has the resource
-pack (scenes, shaders, data) embedded; the Linux binary needs `godot-fly.pck` next to it.
-No Godot or Python needed on the target machine.
+Installs the matching export templates on first run. Both binaries embed the resource pack
+(scenes, shaders, data), so each is a single file to copy — there is no `.pck` to ship
+alongside, and nothing to keep named in sync. No Godot or Python needed on the target
+machine.
+
+If you add an export preset of your own, keep **Embed Pck** on and keep the
+`include_filter` for `data/*.bmesh, data/*.mm, data/*.bin, data/*.json`: those are plain
+files rather than Godot resources, so without the filter the build runs on the dev machine
+and shows an empty scene everywhere else.
 
 ## How the stereo works
 

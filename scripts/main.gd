@@ -2,10 +2,12 @@ extends Node
 ## Male CNS connectome viewer — glue: loads data, builds the scene, handles keys and UI.
 ##
 ## Command line (after `++`):  --3d=half|full|wall|mono  --swap  --story[=N] / --no-story
-##                              --wall  --wall-size=6.047x2.042  --wall-distance=2.282  --wall-eye=0.063  --wall-res=4800x1620
-## satwatch2-compatible:         -- --stereo [4800 1620] [--swap-eyes]  --ipd=0.033  --conv=1.0  --fov=70
-##                              --width=1.2  --brightness=0.02  --rois  --no-shells  --no-rotate
-##                              --windowed  --help=0  --demo  --stim="AL(R)"   (starts fullscreen)
+##                              --ipd=0.033  --conv=1.0  --fov=70  --width=1.2  --brightness=0.02
+##                              --rois  --no-shells  --no-rotate  --windowed  (starts fullscreen)
+##                              --help=0  --demo  --stim="AL(R)"
+##
+## Wall geometry is configuration, not flags: pick the wall format with T, set the metres /
+## pixels in user://flyviz.cfg, press C to save, and it is applied on the next start.
 
 const CONFIG_PATH := "user://flyviz.cfg"
 
@@ -439,28 +441,12 @@ func _save_config() -> void:
 
 func _apply_cmdline() -> void:
 	var args := OS.get_cmdline_user_args()
-	# satwatch2 / stereo_wall_display convention:  -- --stereo [W H] [--swap-eyes]
-	var si := args.find("--stereo")
-	if si >= 0:
-		stereo.set_mode(StereoRig.Mode.WALL)
-		if si + 2 < args.size() and args[si + 1].is_valid_int():
-			stereo.wall_eye_width = int(args[si + 1])
-			stereo.wall_eye_height = int(args[si + 2])
-	if args.has("--swap-eyes"):
-		stereo.swap_eyes = true
 	for arg in args:
 		var kv := arg.trim_prefix("--").split("=", true, 1)
 		var key := kv[0]
 		var val := kv[1] if kv.size() > 1 else ""
 		match key:
-			"sbs", "stereo", "3d": stereo.set_mode(StereoRig.MODE_KEYS.get(val, stereo.mode))
-			"wall": stereo.set_mode(StereoRig.Mode.WALL)
-			"wall-size":   # metres, e.g. --wall-size=6.047x2.042
-				var p := val.split("x"); stereo.wall_width = float(p[0]); stereo.wall_height = float(p[1])
-			"wall-distance": stereo.wall_distance = float(val)
-			"wall-eye": stereo.wall_eye_separation = float(val)
-			"wall-res":    # pixels per eye, e.g. --wall-res=4800x1620
-				var p := val.split("x"); stereo.wall_eye_width = int(p[0]); stereo.wall_eye_height = int(p[1])
+			"sbs", "3d": stereo.set_mode(StereoRig.MODE_KEYS.get(val, stereo.mode))
 			"ipd": stereo.ipd_ratio = float(val)
 			"conv": stereo.convergence_factor = float(val)
 			"fov": stereo.hfov_deg = float(val)
@@ -484,4 +470,4 @@ func _apply_cmdline() -> void:
 			"help": help_visible = val != "0"
 			"screenshot": _shot_path = val; _shot_timer = 2.0   # save after 2 s and quit
 	if stereo.mode == StereoRig.Mode.WALL:
-		stereo.apply_wall_window()
+		stereo.apply_wall_window()          # --3d=wall: size the window from the [wall] config
