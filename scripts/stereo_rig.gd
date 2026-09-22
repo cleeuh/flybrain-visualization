@@ -7,22 +7,16 @@ extends Control
 ## shaders/stereo_composite.gdshader in the format the display expects:
 ##   SBS_HALF     one frame, eyes squeezed side by side        ("single input" 3D TVs / walls)
 ##   SBS_FULL     window two frames wide, each eye full-res     (dual-output walls, or one 2x-wide input)
-##   TOP_BOTTOM   one frame, eyes squeezed top / bottom
-##   ROW_INTERLEAVED, COLUMN_INTERLEAVED, CHECKERBOARD   passive (polarised) walls; window must be
-##                pixel-exact fullscreen at native resolution
-##   SEQUENTIAL   alternate eyes every frame (active shutter; needs vsync at 2x eye rate)
 ##   WALL         physical powerwall: two full-res eye images side by side in a borderless
 ##                window, off-axis frustums derived from the wall's real size, viewer distance
 ##                and eye separation (addons/stereo_wall_display, UH LAVA, MIT). The orbit
 ##                target always sits on the wall plane; zooming rescales the world.
 ##   MONO         single camera
 
-enum Mode { SBS_HALF, SBS_FULL, TOP_BOTTOM, ROW_INTERLEAVED, COLUMN_INTERLEAVED, CHECKERBOARD, SEQUENTIAL, WALL, MONO }
-const MODE_NAMES := ["SBS half", "SBS full", "top-bottom", "row interleaved", "column interleaved", "checkerboard", "frame sequential", "wall", "mono"]
-const MODE_KEYS := {"half": Mode.SBS_HALF, "sbs": Mode.SBS_HALF, "full": Mode.SBS_FULL, "tb": Mode.TOP_BOTTOM,
-	"top-bottom": Mode.TOP_BOTTOM, "rows": Mode.ROW_INTERLEAVED, "row": Mode.ROW_INTERLEAVED,
-	"columns": Mode.COLUMN_INTERLEAVED, "column": Mode.COLUMN_INTERLEAVED, "checkerboard": Mode.CHECKERBOARD,
-	"sequential": Mode.SEQUENTIAL, "wall": Mode.WALL, "mono": Mode.MONO}
+enum Mode { SBS_HALF, SBS_FULL, WALL, MONO }
+const MODE_NAMES := ["SBS half", "SBS full", "wall", "mono"]
+const MODE_KEYS := {"half": Mode.SBS_HALF, "sbs": Mode.SBS_HALF, "full": Mode.SBS_FULL,
+	"wall": Mode.WALL, "mono": Mode.MONO}
 
 @export var mode: Mode = Mode.SBS_HALF
 @export var swap_eyes := false
@@ -31,6 +25,10 @@ const MODE_KEYS := {"half": Mode.SBS_HALF, "sbs": Mode.SBS_HALF, "full": Mode.SB
 ## Multiplier on the target distance to place the zero-parallax plane.
 @export var convergence_factor := 1.0
 @export var hfov_deg := 70.0
+## Fraction of the frame width to push the rendered image left, so the story panel on the
+## right does not sit on top of the subject. Lens shift, not a camera move, so it survives
+## the rig rotating; ignored in WALL mode, whose frustums come from the physical screen.
+var view_shift := 0.0
 @export var near := 2.0
 @export var far := 20000.0
 
@@ -53,7 +51,6 @@ var _cams: Array[Camera3D] = []
 var _ui_layers: Array[CanvasLayer] = []
 var _out: ColorRect
 var _mat: ShaderMaterial
-var _frame_eye := 0
 
 
 func _ready() -> void:
@@ -107,6 +104,12 @@ func mode_name() -> String:
 	return MODE_NAMES[mode]
 
 
+## Aspect ratio of one rendered eye image (before any display un-squeeze).
+func eye_aspect() -> float:
+	var vp := _views[0].size if not _views.is_empty() else Vector2i(1920, 1080)
+	return float(vp.x) / maxf(float(vp.y), 1.0)
+
+
 ## Borderless window at (0,0) sized for two eye images side by side, as the wall expects.
 func apply_wall_window() -> void:
 	var w := get_window()
@@ -121,23 +124,19 @@ func apply_wall_window() -> void:
 func _layout() -> void:
 	var win := Vector2i(get_viewport().get_visible_rect().size)
 	# Each eye is rendered at the resolution it will finally be shown at, then the composite
-	# shader packs the two. Squeezed formats (SBS half / top-bottom) render full-res so the
-	# display's un-squeeze restores the correct aspect.
+	# shader packs the two. SBS half renders full-res so the display's un-squeeze restores
+	# the correct aspect.
 	var frame := win
 	if mode == Mode.SBS_FULL or mode == Mode.WALL:
 		frame = Vector2i(win.x / 2, win.y)
 	for vp in _views:
 		vp.size = frame
 	_views[1].render_target_update_mode = SubViewport.UPDATE_DISABLED if mode == Mode.MONO else SubViewport.UPDATE_ALWAYS
-	var pattern: int = {Mode.SBS_HALF: 0, Mode.SBS_FULL: 0, Mode.TOP_BOTTOM: 1, Mode.ROW_INTERLEAVED: 2,
-		Mode.COLUMN_INTERLEAVED: 3, Mode.CHECKERBOARD: 4, Mode.SEQUENTIAL: 5, Mode.WALL: 0, Mode.MONO: 6}[mode]
+	var pattern: int = {Mode.SBS_HALF: 0, Mode.SBS_FULL: 0, Mode.WALL: 0, Mode.MONO: 1}[mode]
 	_mat.set_shader_parameter("pattern", pattern)
 
 
 func _process(_dt: float) -> void:
-	if mode == Mode.SEQUENTIAL:
-		_frame_eye = 1 - _frame_eye
-		_mat.set_shader_parameter("frame_eye", _frame_eye)
 	if head == null:
 		return
 	var xf := head.global_transform
@@ -147,11 +146,13 @@ func _process(_dt: float) -> void:
 	var conv := maxf(target_distance * convergence_factor, near * 2.0)
 	var ipd := conv * ipd_ratio
 	var size := 2.0 * near * tan(deg_to_rad(hfov_deg) * 0.5)   # near-plane width
+	var shift := view_shift * size
 	if mode == Mode.MONO:
 		var c := _cams[0]
-		c.projection = Camera3D.PROJECTION_PERSPECTIVE
+		c.projection = Camera3D.PROJECTION_FRUSTUM
 		c.keep_aspect = Camera3D.KEEP_WIDTH
-		c.fov = hfov_deg
+		c.size = size
+		c.frustum_offset = Vector2(shift, 0.0)
 		c.global_transform = xf
 		return
 	for i in 2:
@@ -163,7 +164,7 @@ func _process(_dt: float) -> void:
 		c.keep_aspect = Camera3D.KEEP_WIDTH
 		c.size = size
 		# shift the near-plane window toward the convergence plane
-		c.frustum_offset = Vector2(-eye * (ipd * 0.5) * near / conv, 0.0)
+		c.frustum_offset = Vector2(shift - eye * (ipd * 0.5) * near / conv, 0.0)
 		c.global_transform = xf.translated(xf.basis.x * (eye * ipd * 0.5))
 
 

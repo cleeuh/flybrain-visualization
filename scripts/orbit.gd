@@ -9,6 +9,8 @@ extends Node3D
 @export var auto_rotate_speed := 6.0   # deg / s
 @export var min_distance := 50.0
 @export var max_distance := 8000.0
+## Story mode takes the left / right arrows over for slide navigation.
+var arrows_enabled := true
 
 @onready var head: Node3D = $Head
 
@@ -16,12 +18,22 @@ var _dragging := false
 var _yaw_target := 0.0
 var _pitch_target := 0.0
 var _dist_target := 0.0
+var _pivot_target := Vector3.ZERO
 
 
 func _ready() -> void:
 	_yaw_target = yaw_deg
 	_pitch_target = pitch_deg
 	_dist_target = distance
+	_pivot_target = position
+
+
+## Smoothly fly to a framing (used by the story tour). Angles in degrees, pivot in scene units.
+func goto(pivot: Vector3, yaw: float, pitch: float, dist: float) -> void:
+	_pivot_target = pivot
+	_yaw_target = yaw
+	_pitch_target = clampf(pitch, -89, 89)
+	_dist_target = clampf(dist, min_distance, max_distance)
 
 
 func _unhandled_input(e: InputEvent) -> void:
@@ -42,13 +54,13 @@ func _unhandled_input(e: InputEvent) -> void:
 
 func _process(dt: float) -> void:
 	var spd := 60.0 * dt
-	if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A):
+	if (Input.is_key_pressed(KEY_LEFT) and arrows_enabled) or Input.is_key_pressed(KEY_A):
 		_yaw_target += spd; auto_rotate = false
-	if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D):
+	if (Input.is_key_pressed(KEY_RIGHT) and arrows_enabled) or Input.is_key_pressed(KEY_D):
 		_yaw_target -= spd; auto_rotate = false
-	if Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W):
+	if (Input.is_key_pressed(KEY_UP) and arrows_enabled) or Input.is_key_pressed(KEY_W):
 		_pitch_target = clampf(_pitch_target + spd, -89, 89); auto_rotate = false
-	if Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S):
+	if (Input.is_key_pressed(KEY_DOWN) and arrows_enabled) or Input.is_key_pressed(KEY_S):
 		_pitch_target = clampf(_pitch_target - spd, -89, 89); auto_rotate = false
 	if Input.is_key_pressed(KEY_Q) or Input.is_key_pressed(KEY_PAGEUP):
 		_dist_target *= 1.0 - dt
@@ -62,5 +74,6 @@ func _process(dt: float) -> void:
 	yaw_deg = lerpf(yaw_deg, _yaw_target, k)
 	pitch_deg = lerpf(pitch_deg, _pitch_target, k)
 	distance = lerpf(distance, _dist_target, k)
+	position = position.lerp(_pivot_target, k)
 	rotation_degrees = Vector3(pitch_deg, yaw_deg, 0)
 	head.position = Vector3(0, 0, distance)

@@ -1,11 +1,11 @@
 extends Node
 ## Male CNS connectome viewer — glue: loads data, builds the scene, handles keys and UI.
 ##
-## Command line (after `++`):  --3d=half|full|tb|rows|columns|checkerboard|sequential|wall|mono  --swap
+## Command line (after `++`):  --3d=half|full|wall|mono  --swap  --story[=N]
 ##                              --wall  --wall-size=6.047x2.042  --wall-distance=2.282  --wall-eye=0.063  --wall-res=4800x1620
 ## satwatch2-compatible:         -- --stereo [4800 1620] [--swap-eyes]  --ipd=0.033  --conv=1.0  --fov=70
 ##                              --width=1.2  --brightness=0.02  --rois  --no-shells  --no-rotate
-##                              --fullscreen  --help=0  --demo  --stim="AL(R)"
+##                              --windowed  --help=0  --demo  --stim="AL(R)"   (starts fullscreen)
 
 const CONFIG_PATH := "user://flyviz.cfg"
 
@@ -15,6 +15,10 @@ const CONFIG_PATH := "user://flyviz.cfg"
 
 var neurons: Neurons
 var shells: Node3D
+var shell_nodes: Array[MeshInstance3D] = []
+var story: Story
+var story_panels: Array[PanelContainer] = []
+var story_labels: Array[RichTextLabel] = []
 var rois: Node3D
 var legends: Array[Control] = []
 var help_visible := true
@@ -45,6 +49,11 @@ func _ready() -> void:
 		neurons.set_activity_texture(sim.texture)
 		sim.changed.connect(_on_sim_changed)
 	_stim_material = _shell_material(Color(1.0, 0.95, 0.6, 1.0), 0.12, 0.9)
+	story = Story.new()
+	story.name = "Story"
+	add_child(story)
+	story.setup(rig, stereo, neurons, shell_nodes, roi_by_name)
+	story.changed.connect(_update_ui)
 	_apply_cmdline()
 	neurons.set_width(ribbon_width)
 	neurons.set_brightness(brightness)
@@ -59,6 +68,8 @@ var _shot_timer := 0.0
 
 func _process(dt: float) -> void:
 	stereo.target_distance = rig.distance
+	if story != null and story.active:
+		_place_story_panels()
 	if _shot_path != "":
 		_shot_timer -= dt
 		if _shot_timer <= 0.0:
@@ -107,8 +118,10 @@ func _build_meshes() -> void:
 			continue
 		var mi := MeshInstance3D.new()
 		mi.mesh = mesh
+		mi.name = n
 		mi.material_override = _shell_material(Color(0.35, 0.55, 1.0, 0.25), 0.02, 0.35)
 		shells.add_child(mi)
+		shell_nodes.append(mi)
 
 	rois = Node3D.new()
 	rois.name = "ROIs"
@@ -142,6 +155,11 @@ func _unhandled_key_input(e: InputEvent) -> void:
 	var shift: bool = e.shift_pressed
 	match k:
 		KEY_ESCAPE: get_tree().quit()
+		KEY_V: _toggle_story()
+		KEY_RIGHT, KEY_LEFT:
+			if not story.active:
+				return                       # arrows orbit in free flight (polled by OrbitRig)
+			story.step(1 if k == KEY_RIGHT else -1)
 		KEY_F11, KEY_F: _toggle_fullscreen()
 		KEY_F12: _save_screenshot("user://screenshot_%s.png" % Time.get_datetime_string_from_system().replace(":", "-"))
 		KEY_H: help_visible = not help_visible
@@ -184,6 +202,15 @@ func _unhandled_key_input(e: InputEvent) -> void:
 	_update_ui()
 
 
+func _toggle_story() -> void:
+	if story.active:
+		story.stop()
+		_refresh_rois()
+	else:
+		shells.visible = true
+		story.start()
+
+
 func _set_sim(on: bool) -> void:
 	if not sim.loaded:
 		return
@@ -194,6 +221,8 @@ func _set_sim(on: bool) -> void:
 
 ## Neuropil meshes: all shown when show_rois, the stimulation target always (highlighted).
 func _refresh_rois() -> void:
+	if story != null and story.active:
+		return                               # the tour owns the neuropil meshes while it runs
 	var t := sim.target() if sim.loaded else {}
 	for name in roi_by_name:
 		var mi: MeshInstance3D = roi_by_name[name]
@@ -234,6 +263,10 @@ func _toggle_fullscreen() -> void:
 
 # --------------------------------------------------------------------------- UI (drawn in each eye)
 
+const STORY_PANEL_W := 560.0
+const STORY_MARGIN := 40.0
+
+
 func _build_ui() -> void:
 	for layer in stereo.ui_layers():
 		var lbl := RichTextLabel.new()
@@ -248,11 +281,69 @@ func _build_ui() -> void:
 		layer.add_child(lbl)
 		legends.append(lbl)
 
+		var panel := PanelContainer.new()
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.02, 0.03, 0.05, 0.72)
+		sb.border_color = Color(0.35, 0.55, 1.0, 0.35)
+		sb.border_width_left = 2
+		sb.set_content_margin_all(28)
+		sb.set_corner_radius_all(6)
+		panel.add_theme_stylebox_override("panel", sb)
+		panel.visible = false
+		var story_lbl := RichTextLabel.new()
+		story_lbl.bbcode_enabled = true
+		story_lbl.scroll_active = false
+		story_lbl.fit_content = true
+		story_lbl.custom_minimum_size = Vector2(STORY_PANEL_W, 0)
+		story_lbl.add_theme_font_size_override("normal_font_size", 21)
+		story_lbl.add_theme_font_size_override("bold_font_size", 21)
+		story_lbl.add_theme_font_size_override("italics_font_size", 21)
+		panel.add_child(story_lbl)
+		layer.add_child(panel)
+		story_panels.append(panel)
+		story_labels.append(story_lbl)
+	get_viewport().size_changed.connect(_update_ui)
+
+
+func _update_story_panels() -> void:
+	var text: String = story.panel_text() if story.active else ""
+	for i in story_panels.size():
+		story_panels[i].visible = story.active
+		if story.active:
+			story_labels[i].text = text
+	_place_story_panels()
+
+
+## Pin each eye's narration panel to the right-hand edge of its viewport. Run every frame
+## while the tour is up: the label's fit_content height only settles after a layout pass.
+func _place_story_panels() -> void:
+	for panel in story_panels:
+		if not panel.visible:
+			continue
+		var layer := panel.get_parent() as CanvasLayer
+		var vp := layer.get_viewport()
+		if vp == null:
+			continue
+		var sc: float = maxf(layer.scale.x, 0.01)
+		panel.reset_size()
+		panel.position = Vector2(vp.size.x / sc - panel.size.x - STORY_MARGIN, STORY_MARGIN)
+
 
 func _update_ui() -> void:
 	for layer in stereo.ui_layers():
 		var vp := layer.get_viewport()
 		layer.scale = Vector2.ONE * maxf(vp.size.y / 1080.0, 0.5) if vp else Vector2.ONE
+	_update_story_panels()
+	if story.active:
+		# the tour owns the screen: left side keeps only the dataset line and the key hints
+		var s := "[b]Drosophila male CNS connectome[/b]  [color=#888](FlyEM / Janelia, male-cns v1.0, CC-BY)[/color]\n"
+		s += "[color=#aaa]%d neurons · %d skeleton segments · %s[/color]\n" % [
+			neurons.index.size(), neurons.segment_count, stereo.mode_name()]
+		if help_visible:
+			s += "\n[color=#777]← →: slides   V: leave tour   drag / WASD: look   Q E: zoom   H: hide help[/color]"
+		for l in legends:
+			l.text = s
+		return
 	var t := "[b]Drosophila male CNS connectome[/b]  [color=#888](FlyEM / Janelia, male-cns v1.0, CC-BY)[/color]\n"
 	t += "[color=#aaa]%d neurons · %d skeleton segments · %s%s[/color]\n\n" % [
 		neurons.index.size(), neurons.segment_count, stereo.mode_name(), "  (eyes swapped)" if stereo.swap_eyes else ""]
@@ -283,7 +374,8 @@ func _update_ui() -> void:
 		t += "drag / arrows: orbit   wheel / Q E: zoom   space: auto-rotate\n"
 		t += "1-9 0 ⇧: toggle class   `: all   B: shells   R: neuropils\n"
 		t += "T: 3D format   X: swap eyes   [ ]: eye separation (%.3f)   - =: convergence (%.2f)\n" % [stereo.ipd_ratio, stereo.convergence_factor]
-		t += ", .: width (%.1f)   ; \': brightness (%.3f)   N / ⇧N: step neuron   M: clear   F: fullscreen   C: save config   H: hide help[/color]" % [ribbon_width, brightness]
+		t += ", .: width (%.1f)   ; \': brightness (%.3f)   N / ⇧N: step neuron   M: clear   F: fullscreen   C: save config   H: hide help\n" % [ribbon_width, brightness]
+		t += "V: guided tour of the brain (← → to step through it)[/color]"
 	for l in legends:
 		l.text = t
 
@@ -294,7 +386,8 @@ func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(CONFIG_PATH) != OK:
 		return
-	stereo.mode = cfg.get_value("stereo", "mode", stereo.mode)
+	# clamp: configs written before the non-SBS formats were removed may hold a stale index
+	stereo.mode = clampi(int(cfg.get_value("stereo", "mode", stereo.mode)), 0, StereoRig.Mode.size() - 1) as StereoRig.Mode
 	stereo.swap_eyes = cfg.get_value("stereo", "swap_eyes", stereo.swap_eyes)
 	stereo.ipd_ratio = cfg.get_value("stereo", "ipd_ratio", stereo.ipd_ratio)
 	stereo.convergence_factor = cfg.get_value("stereo", "convergence_factor", stereo.convergence_factor)
@@ -377,7 +470,9 @@ func _apply_cmdline() -> void:
 						sim.target_idx = i
 				_set_sim(true); sim.pulse()
 			"no-shells": shells.visible = false
+			"story": story.start(int(val) - 1 if val.is_valid_int() else 0)
 			"fullscreen": get_window().mode = Window.MODE_FULLSCREEN
+			"windowed": get_window().mode = Window.MODE_WINDOWED
 			"help": help_visible = val != "0"
 			"screenshot": _shot_path = val; _shot_timer = 2.0   # save after 2 s and quit
 	if stereo.mode == StereoRig.Mode.WALL:

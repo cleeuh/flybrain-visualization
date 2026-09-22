@@ -14,6 +14,32 @@ Data: https://male-cns.janelia.org/download/ (CC-BY 4.0).
 - Brain and VNC outline shells.
 - 114 neuropil compartment meshes (toggle with `R`).
 
+## Guided tour (`V`, or `--story`)
+
+Press **V** for a narrated slide tour of the nervous system, stepped with the **← / →**
+arrow keys (they navigate slides instead of orbiting while the tour is up). It opens on the
+whole CNS, flies into the head while the outer shell fades to fully transparent, then visits
+one region per slide — optic lobes, antennal lobe, mushroom body, lateral horn, central
+complex, AMMC/wedge, gnathal ganglia, the neck connective and the ventral nerve cord —
+lighting that region's neuropil meshes, framing them, and showing only the relevant neuron
+superclasses. The narration (title, formal name, abbreviations, description) sits in a panel
+down the right-hand edge, drawn in both eyes at zero parallax. Stepping past either end, or
+pressing `V` again, hands control back to free flight.
+
+Slides are plain data at the top of [`scripts/story.gd`](scripts/story.gd) — edit `SLIDES`
+to re-order, re-word or add regions (`rois` takes neuropil names as in `data/rois.json`,
+without the `(L)` / `(R)` suffix). `--story` starts in the tour, `--story=5` at slide 5.
+`godot --headless --path . -s tools/story_test.gd` walks every slide and checks each one
+still resolves its neuropils; `tools/story_shots.gd` (needs a display, e.g.
+`xvfb-run -s "-screen 0 1280x720x24" godot --path . -s tools/story_shots.gd ++ --3d=mono`)
+renders one PNG per slide to `user://` so the framing can be eyeballed.
+
+While the tour is up the rendered image is lens-shifted left by 16 % of the frame
+(`Story.VIEW_SHIFT`, a frustum offset, not a camera move) so the panel never sits on the
+subject, and each slide's framing distance is computed from the region's bounding box and
+the eye's own field of view. Powerwall mode keeps its physical off-axis frustums, so there
+the panel simply overlays the right of the wall.
+
 ## Stimulating the brain
 
 Press **Tab / ⇧Tab** to pick a target — any neuropil (antennal lobe, mushroom body calyx,
@@ -47,40 +73,41 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
 2. Run:
 
    ```sh
-   godot --path . ++ --3d=half --fullscreen           # squeezed side-by-side (single-input 3D TV / wall)
-   godot --path . ++ --3d=tb --fullscreen             # squeezed top-and-bottom
-   godot --path . ++ --3d=rows --fullscreen           # line-interleaved (passive / polarised walls)
+   godot --path . ++ --3d=half                        # squeezed side-by-side (single-input 3D TV / wall)
    godot --path . ++ --3d=full                        # window two frames wide, full-res per eye
    godot --path . ++ --3d=mono                        # plain 3D
+   godot --path . ++ --3d=half --windowed             # don't start fullscreen
 
    godot --path . ++ --wall --demo                    # UH LAVA powerwall (see below)
    godot --path . -- --stereo 4800 1620 --demo        # same, satwatch2-style flags
 
-   All formats: `half` `full` `tb` `rows` `columns` `checkerboard` `sequential` `wall` `mono`.
-   Interleaved / checkerboard need the window pixel-exact at the wall's native resolution
-   (`--fullscreen`); `sequential` needs vsync at twice the eye rate (active shutter).
+   All formats: `half` `full` `wall` `mono`. The window starts fullscreen (`--windowed` to
+   opt out; `--fullscreen` is still accepted).
    If a wall's menu says "single 3D" it takes one input carrying both eyes — pick the packing
    named in that menu. `X` swaps eyes if the depth looks inside-out.
    ```
 
    Other flags: `--swap` `--ipd=0.033` `--conv=1.0` `--fov=70` `--width=1.2`
    `--brightness=0.02` `--rois` `--no-shells` `--no-rotate` `--help=0`
-   `--demo` (auto-stimulate random regions) `--stim="AL(R)"` (pulse a region at start).
+   `--demo` (auto-stimulate random regions) `--stim="AL(R)"` (pulse a region at start)
+   `--story` / `--story=5` (start in the guided tour).
    Press `C` to save the current settings to `user://flyviz.cfg` (loaded on start).
 
 ## Controls
 
 | key | action |
 |---|---|
+| V | guided tour of the brain |
+| ← → | previous / next slide (during the tour) |
 | Tab / ⇧Tab | choose stimulation target (neuropil or class) |
 | Enter | pulse the target |
 | L / G / P / K | tonic drive / auto demo / pause / stop simulation |
-| drag / arrows / WASD | orbit |
+| drag / arrows / WASD | orbit (arrows step slides during the tour) |
 | wheel / Q E | zoom |
 | space | auto-rotate |
 | 1-9 0, ⇧1-4 | toggle neuron class; `` ` `` all |
 | B / R | brain+VNC shells / neuropil ROIs |
-| T | cycle 3D format (SBS half → SBS full → top-bottom → rows → columns → checkerboard → sequential → wall → mono) |
+| T | cycle 3D format (SBS half → SBS full → wall → mono) |
 | F12 | screenshot to `user://` |
 | X | swap eyes |
 | [ ] | eye separation |
@@ -152,9 +179,10 @@ tools/build_sim.py     neuropil membership (2 µm ROI volume), NT signs, synapti
 scripts/sim.gd         leaky integrate-and-fire spreading activation, activity texture
 scripts/neurons.gd     MultiMesh loader (one instance per segment)
 shaders/neuron_ribbon.gdshader   screen-space ribbon expansion, per-class colour/visibility
-scripts/stereo_rig.gd  stereo cameras + output packing (SBS/TB/interleaved/wall)
+scripts/stereo_rig.gd  stereo cameras + output packing (SBS half / full / wall)
 shaders/stereo_composite.gdshader   packs the two eye renders into the display's format
 addons/stereo_wall_display/         vendored UH LAVA powerwall addon (MIT); wall mode uses its projection
-scripts/orbit.gd       orbit camera
+scripts/story.gd       guided slide tour: slide data, region framing, shell / neuropil fades
+scripts/orbit.gd       orbit camera (animated pivot, so the tour can fly into a region)
 scripts/main.gd        glue, input, legend, config
 ```
