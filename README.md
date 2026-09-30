@@ -169,16 +169,17 @@ eye compositing against the base resolution.
 ## Building a standalone executable
 
 ```sh
-./export.sh            # build/godot-fly.exe + build/godot-fly.x86_64, both self-contained
+./export.sh            # build/godot-fly.exe + godot-fly.pck, build/godot-fly.x86_64 (self-contained)
 ./export.sh windows    # one platform
 ```
 
-Installs the matching export templates on first run. Both binaries embed the resource pack
-(scenes, shaders, data), so each is a single file to copy — there is no `.pck` to ship
-alongside, and nothing to keep named in sync. No Godot or Python needed on the target
-machine.
+Installs the matching export templates on first run. The Linux binary embeds the resource
+pack (scenes, shaders, data). The Windows build does **not** — an exe with the pack appended
+doesn't start — so copy `godot-fly.exe` and `godot-fly.pck` together, from the same export,
+into the same folder (a missing or mismatched `.pck` is the "Couldn't load project data"
+error at startup). No Godot or Python needed on the target machine.
 
-If you add an export preset of your own, keep **Embed Pck** on and keep the
+If you add an export preset of your own, keep the
 `include_filter` for `data/*.bmesh, data/*.mm, data/*.bin, data/*.json`: those are plain
 files rather than Godot resources, so without the filter the build runs on the dev machine
 and shows an empty scene everywhere else.

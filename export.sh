@@ -43,4 +43,4 @@ fi
 
 echo ">> build/:"
 ls -lh build/ | tail -n +2
-echo "Both binaries are self-contained (the pack is embedded): copy the single file and run it."
+echo "Linux: godot-fly.x86_64 is self-contained.  Windows: copy godot-fly.exe together with godot-fly.pck."
