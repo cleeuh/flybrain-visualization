@@ -8,6 +8,7 @@ extends Node
 ## Stimulus targets are neuropil regions (geometric membership) or neuron superclasses.
 
 signal changed
+signal pulsed     ## a pulse was delivered (by key, --stim or the auto demo)
 
 const TICK_HZ := 10.0
 var leak := 0.4                # membrane potential retained per tick
@@ -171,6 +172,8 @@ func _tick() -> void:
 	# 2. stimulus
 	if (_pending_pulse or tonic) and not targets.is_empty():
 		var drive := STIM_DRIVE * (1.6 if _pending_pulse else 0.5)
+		if _pending_pulse:
+			pulsed.emit()
 		for i in target().members:
 			input[i] += drive * randf_range(0.6, 1.4)
 		_pending_pulse = false

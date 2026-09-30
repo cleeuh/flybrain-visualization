@@ -329,7 +329,10 @@ func _apply() -> void:
 	# the stylised body, and whether the connectome itself is drawn at all
 	_tween.tween_method(_fly.set_alpha, _fly.alpha(), float(s.get("fly", 0.0)), FLY_SECONDS)
 	_fly.flying = bool(s.get("hover", false))
-	_neurons.visible = bool(s.get("neurons", true))
+	var show_neurons := bool(s.get("neurons", true))
+	if show_neurons and not _neurons.visible:
+		_neurons.reveal()                # the connectome grows out of the body as it dissolves
+	_neurons.visible = show_neurons
 
 	# neuron superclasses
 	var classes: Array = s.get("classes", [])
@@ -416,6 +419,9 @@ func _story_mat(name: String) -> ShaderMaterial:
 		m.set_shader_parameter("color", Color(1.0, 0.82, 0.45, 0.0))
 		m.set_shader_parameter("fill", 0.09)
 		m.set_shader_parameter("rim", 0.8)
+		m.set_shader_parameter("breathe", 0.18)
+		m.set_shader_parameter("scan", 0.35)
+		m.set_shader_parameter("scan_spacing", 18.0)
 		_roi_mats[name] = m
 	return _roi_mats[name]
 

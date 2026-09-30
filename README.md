@@ -50,6 +50,26 @@ subject, and each slide's framing distance is computed from the region's boundin
 the eye's own field of view. Powerwall mode keeps its physical off-axis frustums, so there
 the panel simply overlays the right of the wall.
 
+## Ambient animation (`Z`)
+
+Small, slow motion keeps the picture alive without competing with it — everything additive,
+faint and off the subject's silhouette:
+
+- **glints** — a few percent of neurons at a time brighten for a couple of seconds, with
+  impulses running outward along them;
+- **a slow wave** rolling from the brain down the nerve cord every 16 s;
+- **grow-in** — the connectome grows out from the centre when it first appears (start-up in
+  free flight, and on the tour as the fly's body dissolves);
+- **lit neuropils** on the tour breathe and carry faint contour lines creeping up their surface;
+- **class cross-fades** when a slide (or `1`–`0`) shows or hides a superclass;
+- **motes** — a sparse field of pixel-sized drifting points around the CNS, which give the
+  stereo image depth cues in the empty space without ever growing into blobs up close;
+- the stimulated neuropil **flares** on each pulse, and the tour's narration eases in per slide.
+
+Glints and the wave switch off while the simulation runs or a single neuron is highlighted,
+so they never read as activity. `Z` fades all of it in or out (it is one shader global,
+`anim_level`); `--no-anim` starts with it off, and `C` saves the choice.
+
 ## Stimulating the brain
 
 Press **Tab / ⇧Tab** to pick a target — any neuropil (antennal lobe, mushroom body calyx,
@@ -99,7 +119,8 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
    Other flags: `--swap` `--ipd=0.033` `--conv=1.0` `--fov=70` `--width=1.2`
    `--brightness=0.02` `--rois` `--no-shells` `--no-rotate` `--help=0`
    `--demo` (auto-stimulate random regions) `--stim="AL(R)"` (pulse a region at start)
-   `--no-story` (skip the guided tour at startup) / `--story=5` (start it at slide 5).
+   `--no-story` (skip the guided tour at startup) / `--story=5` (start it at slide 5)
+   `--no-anim` (start with the ambient animation off).
    Press `C` to save the current settings to `user://flyviz.cfg` (loaded on start).
 
 ## Controls
@@ -126,6 +147,7 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
 | ; ' | brightness |
 | N / ⇧N, M | step through / clear single-neuron highlight |
 | F / F11 | fullscreen |
+| Z | ambient animation on / off |
 | H | hide help |
 | C | save config |
 | Esc | quit |

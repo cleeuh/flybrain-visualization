@@ -13,8 +13,18 @@ uniform float dim_others = 1.0;   // brightness multiplier for non-highlighted n
 uniform sampler2D activity : filter_nearest, repeat_disable;   // 1-D, indexed by neuron id
 uniform float sim_active = 0.0;   // 1 = simulation running: rest neurons dimmed, spikes flash
 uniform float rest_level = 0.2;
+// ambient animation (scaled by the anim_level global, 0 = static)
+global uniform float anim_level;
+uniform float reveal_radius = 1e9;          // grow-in: segments farther than this from the origin are hidden
+uniform vec2 sweep_z = vec2(-900.0, 1900.0);  // brain -> nerve cord extent of the slow wave
+uniform float sweep_period = 16.0;          // s per wave
+uniform float sweep_gain = 0.45;
+uniform float glint_frac = 0.025;           // fraction of neurons glinting at any moment
+uniform float glint_gain = 3.5;
 
 varying vec4 col;
+
+float hash1(float x) { return fract(sin(x * 12.9898 + 78.233) * 43758.5453); }
 
 void vertex() {
 	vec3 a = MODEL_MATRIX[3].xyz;
@@ -32,6 +42,26 @@ void vertex() {
 		vec4 flash = (colors[g] * 2.0 + vec4(0.25)) * brightness * 2.0;
 		col = mix(col * rest_level, flash, a);
 	}
+	// ambient life: a few neurons at a time glint with impulses travelling outward from the
+	// centre, and a faint wave rolls from the brain down the nerve cord. Off while the
+	// simulation runs (it has its own, meaningful, activity) and during a single-neuron highlight.
+	float calm = (1.0 - sim_active) * (highlight < 0.0 ? 1.0 : 0.0) * anim_level;
+	if (calm > 0.0) {
+		float h = hash1(nid);
+		float cyc = TIME / 4.5 + h * 17.0;
+		float on = step(hash1(nid + floor(cyc) * 7.13), glint_frac);
+		float env = sin(fract(cyc) * PI);
+		float spikes = pow(0.5 + 0.5 * sin(length(a) / 45.0 - TIME * 5.0 - h * 30.0), 4.0);
+		float glint = on * env * env * (0.35 + 0.65 * spikes);
+		float zf = mix(sweep_z.x - 400.0, sweep_z.y + 400.0, fract(TIME / sweep_period));
+		float dz = (a.z - zf) / 140.0;
+		float sweep = exp(-dz * dz);
+		col.rgb *= 1.0 + calm * (glint_gain * glint + sweep_gain * sweep);
+	}
+	// grow-in reveal, with a bright leading edge
+	float r = length(a);
+	float edge = (reveal_radius - r) / 60.0;
+	col.rgb *= 1.0 + 3.0 * exp(-edge * edge);
 	col.a = vis;
 
 	mat4 vp = PROJECTION_MATRIX * VIEW_MATRIX;
@@ -48,7 +78,7 @@ void vertex() {
 	vec4 c = mix(ca, cb, UV.x);
 	float side = UV.y * 2.0 - 1.0;
 	c.xy += nrm * side * (width_px / VIEWPORT_SIZE) * c.w;
-	if (vis < 0.5) { c = vec4(0.0, 0.0, -10.0, 1.0); }  // cull hidden groups
+	if (vis < 0.002 || r > reveal_radius) { c = vec4(0.0, 0.0, -10.0, 1.0); }  // cull hidden groups / not yet grown
 	POSITION = c;
 }
 

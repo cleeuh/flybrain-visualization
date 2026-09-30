@@ -4,7 +4,7 @@ extends Node
 ## Command line (after `++`):  --3d=half|full|wall|mono  --swap  --story[=N] / --no-story
 ##                              --ipd=0.033  --conv=1.0  --fov=70  --width=1.2  --brightness=0.02
 ##                              --rois  --no-shells  --no-rotate  --windowed  (starts fullscreen)
-##                              --help=0  --demo  --stim="AL(R)"
+##                              --help=0  --demo  --stim="AL(R)"  --no-anim
 ##
 ## Wall geometry is configuration, not flags: pick the wall format with T, set the metres /
 ## pixels in user://flyviz.cfg, press C to save, and it is applied on the next start.
@@ -34,6 +34,12 @@ var roi_by_name: Dictionary = {}
 var show_rois := false
 var _stim_material: ShaderMaterial
 var _story_on_start := true
+var animations := true               ## ambient motion (glints, waves, motes, fades); Z toggles
+var _anim_tween: Tween
+var _stim_flash: Tween
+var _panel_tween: Tween
+var _panel_slide := 0.0              ## narration panel's slide-in offset, px
+var _panel_slide_index := -1
 
 
 func _ready() -> void:
@@ -42,6 +48,9 @@ func _ready() -> void:
 	_load_config()
 	_build_environment()
 	_build_meshes()
+	var motes := Motes.new()
+	motes.name = "Motes"
+	scene_root.add_child(motes)
 	neurons = Neurons.new()
 	neurons.name = "Neurons"
 	scene_root.add_child(neurons)
@@ -52,6 +61,7 @@ func _ready() -> void:
 	if sim.load_data(neurons):
 		neurons.set_activity_texture(sim.texture)
 		sim.changed.connect(_on_sim_changed)
+		sim.pulsed.connect(_flash_stim)
 	_stim_material = _shell_material(Color(1.0, 0.95, 0.6, 1.0), 0.12, 0.9)
 	story = Story.new()
 	story.name = "Story"
@@ -61,6 +71,9 @@ func _ready() -> void:
 	_apply_cmdline()
 	if _story_on_start and not story.active:
 		story.start()                    # the tour is the default entry point (--no-story skips it)
+	elif not story.active and animations:
+		neurons.reveal()                 # free flight: grow the connectome in once at start
+	_set_animations(animations, true)
 	neurons.set_width(ribbon_width)
 	neurons.set_brightness(brightness)
 	_build_ui()
@@ -173,6 +186,7 @@ func _unhandled_key_input(e: InputEvent) -> void:
 		KEY_F11, KEY_F: _toggle_fullscreen()
 		KEY_F12: _save_screenshot("user://screenshot_%s.png" % Time.get_datetime_string_from_system().replace(":", "-"))
 		KEY_H: help_visible = not help_visible
+		KEY_Z: _set_animations(not animations)
 		KEY_SPACE: rig.auto_rotate = not rig.auto_rotate
 		KEY_B: shells.visible = not shells.visible
 		KEY_R:
@@ -223,6 +237,31 @@ func _toggle_story() -> void:
 	else:
 		shells.visible = true
 		story.start()
+
+
+## Ambient animation on / off, eased so it never pops. Everything animated reads the
+## anim_level shader global, so this is the one switch.
+func _set_animations(on: bool, instant := false) -> void:
+	animations = on
+	if _anim_tween != null and _anim_tween.is_valid():
+		_anim_tween.kill()
+	var target := 1.0 if on else 0.0
+	if instant:
+		RenderingServer.global_shader_parameter_set("anim_level", target)
+		return
+	var from: float = RenderingServer.global_shader_parameter_get("anim_level")
+	_anim_tween = create_tween()
+	_anim_tween.tween_method(func(v: float): RenderingServer.global_shader_parameter_set("anim_level", v),
+		from, target, 0.6)
+
+
+## A stimulated neuropil flares and settles back to its highlight, so the pulse has a visible cause.
+func _flash_stim() -> void:
+	if _stim_flash != null and _stim_flash.is_valid():
+		_stim_flash.kill()
+	_stim_flash = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	_stim_flash.tween_method(func(v: float): _stim_material.set_shader_parameter("fill", v), 0.7, 0.12, 0.9)
+	_stim_flash.tween_method(func(v: float): _stim_material.set_shader_parameter("rim", v), 2.4, 0.9, 0.9)
 
 
 func _set_sim(on: bool) -> void:
@@ -321,11 +360,30 @@ func _build_ui() -> void:
 
 func _update_story_panels() -> void:
 	var text: String = story.panel_text() if story.active else ""
+	var new_slide := story.active and story.index != _panel_slide_index
+	_panel_slide_index = story.index if story.active else -1
 	for i in story_panels.size():
 		story_panels[i].visible = story.active
 		if story.active:
 			story_labels[i].text = text
+	if new_slide:
+		_animate_panel_in()
 	_place_story_panels()
+
+
+## Each slide's narration eases in from the right instead of snapping over the old one.
+func _animate_panel_in() -> void:
+	if _panel_tween != null and _panel_tween.is_valid():
+		_panel_tween.kill()
+	if not animations:
+		_panel_slide = 0.0
+		for p in story_panels:
+			p.modulate.a = 1.0
+		return
+	_panel_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_panel_tween.tween_property(self, "_panel_slide", 0.0, 0.55).from(36.0)
+	for p in story_panels:
+		_panel_tween.tween_property(p, "modulate:a", 1.0, 0.45).from(0.0)
 
 
 ## Pin each eye's narration panel to the right-hand edge of its viewport. Run every frame
@@ -340,7 +398,7 @@ func _place_story_panels() -> void:
 			continue
 		var sc: float = maxf(layer.scale.x, 0.01)
 		panel.reset_size()
-		panel.position = Vector2(vp.size.x / sc - panel.size.x - STORY_MARGIN, STORY_MARGIN)
+		panel.position = Vector2(vp.size.x / sc - panel.size.x - STORY_MARGIN + _panel_slide, STORY_MARGIN)
 
 
 func _update_ui() -> void:
@@ -384,7 +442,7 @@ func _update_ui() -> void:
 		t += "1-9 0 ⇧: toggle class   `: all   B: shells   R: neuropils\n"
 		t += "T: 3D format   X: swap eyes   [ ]: eye separation (%.3f)   - =: convergence (%.2f)\n" % [stereo.ipd_ratio, stereo.convergence_factor]
 		t += ", .: width (%.1f)   ; \': brightness (%.3f)   N / ⇧N: step neuron   M: clear   F: fullscreen   C: save config   H: hide help\n" % [ribbon_width, brightness]
-		t += "V: guided tour of the brain (← → to step through it; its last slide has the credits)[/color]"
+		t += "Z: animations (%s)   V: guided tour of the brain (← → to step through it; its last slide has the credits)[/color]" % ("on" if animations else "off")
 	for l in legends:
 		l.text = t
 
@@ -412,6 +470,7 @@ func _load_config() -> void:
 	rig.auto_rotate = cfg.get_value("view", "auto_rotate", rig.auto_rotate)
 	rig.auto_rotate_speed = cfg.get_value("view", "auto_rotate_speed", rig.auto_rotate_speed)
 	help_visible = cfg.get_value("view", "help", help_visible)
+	animations = cfg.get_value("view", "animations", animations)
 	stereo.set_mode(stereo.mode)
 	if stereo.mode == StereoRig.Mode.WALL:
 		stereo.apply_wall_window()
@@ -435,6 +494,7 @@ func _save_config() -> void:
 	cfg.set_value("view", "auto_rotate", rig.auto_rotate)
 	cfg.set_value("view", "auto_rotate_speed", rig.auto_rotate_speed)
 	cfg.set_value("view", "help", help_visible)
+	cfg.set_value("view", "animations", animations)
 	cfg.save(CONFIG_PATH)
 	print("config saved to ", ProjectSettings.globalize_path(CONFIG_PATH))
 
@@ -468,6 +528,7 @@ func _apply_cmdline() -> void:
 			"fullscreen": get_window().mode = Window.MODE_FULLSCREEN
 			"windowed": get_window().mode = Window.MODE_WINDOWED
 			"help": help_visible = val != "0"
+			"no-anim": animations = false
 			"screenshot": _shot_path = val; _shot_timer = 2.0   # save after 2 s and quit
 	if stereo.mode == StereoRig.Mode.WALL:
 		stereo.apply_wall_window()          # --3d=wall: size the window from the [wall] config

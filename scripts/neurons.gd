@@ -4,6 +4,8 @@ extends MultiMeshInstance3D
 ## and renders every skeleton segment as a screen-space ribbon.
 
 const MAX_GROUPS := 16
+const FADE_SECONDS := 0.8      ## class show / hide cross-fade
+const REVEAL_SECONDS := 2.6    ## grow-in from the centre
 
 # Superclass -> display color. Anything unlisted gets a hashed hue.
 const GROUP_COLORS := {
@@ -26,8 +28,12 @@ const GROUP_COLORS := {
 var groups: Array = []          # [{id, name, count}]
 var index: Array = []           # per-neuron metadata
 var segment_count := 0
-var group_visible := PackedFloat32Array()
+var group_visible := PackedFloat32Array()   ## target state, 0 / 1
 var material: ShaderMaterial
+var _shown := PackedFloat32Array()          ## what the shader draws, easing toward group_visible
+var _reveal_max := 3000.0
+var _reveal_t := -1.0          ## seconds into the grow-in, -1 when not growing
+var _reveal_len := REVEAL_SECONDS
 
 
 func load_data(mm_path := "res://data/neurons.mm", json_path := "res://data/neurons.json") -> bool:
@@ -59,6 +65,7 @@ func load_data(mm_path := "res://data/neurons.mm", json_path := "res://data/neur
 	mm.custom_aabb = AABB(lo, hi - lo)
 	custom_aabb = AABB(lo, hi - lo)
 	multimesh = mm
+	_reveal_max = maxf(lo.length(), hi.length()) + 100.0
 
 	material = ShaderMaterial.new()
 	material.shader = load("res://shaders/neuron_ribbon.gdshader")
@@ -71,7 +78,9 @@ func load_data(mm_path := "res://data/neurons.mm", json_path := "res://data/neur
 		colors[int(g.id)] = c
 		group_visible[int(g.id)] = 1.0
 	material.set_shader_parameter("colors", colors)
-	material.set_shader_parameter("visible_groups", group_visible)
+	_shown = group_visible.duplicate()
+	material.set_shader_parameter("visible_groups", _shown)
+	material.set_shader_parameter("sweep_z", Vector2(lo.z, hi.z))
 	material_override = material
 	print("Neurons: %d neurons, %d segments loaded in %d ms" % [index.size(), count, Time.get_ticks_msec() - t])
 	return true
@@ -79,7 +88,6 @@ func load_data(mm_path := "res://data/neurons.mm", json_path := "res://data/neur
 
 func set_group_visible(id: int, on: bool) -> void:
 	group_visible[id] = 1.0 if on else 0.0
-	material.set_shader_parameter("visible_groups", group_visible)
 
 
 func toggle_group(id: int) -> void:
@@ -89,7 +97,33 @@ func toggle_group(id: int) -> void:
 func set_all_visible(on: bool) -> void:
 	for g in groups:
 		group_visible[int(g.id)] = 1.0 if on else 0.0
-	material.set_shader_parameter("visible_groups", group_visible)
+
+
+## Grow the connectome out from the centre of the CNS, a bright front leading the way.
+func reveal(seconds := REVEAL_SECONDS) -> void:
+	_reveal_len = seconds
+	_reveal_t = 0.0
+	material.set_shader_parameter("reveal_radius", 0.0)
+
+
+func _process(dt: float) -> void:
+	if material == null:
+		return
+	if _reveal_t >= 0.0:
+		# clamped step: the shader-compile hitch on the first frames must not skip the grow-in
+		_reveal_t += minf(dt, 1.0 / 30.0)
+		var k := clampf(_reveal_t / _reveal_len, 0.0, 1.0)
+		var r := _reveal_max * (1.0 - pow(1.0 - k, 2.0))
+		material.set_shader_parameter("reveal_radius", r if k < 1.0 else 1e9)
+		if k >= 1.0:
+			_reveal_t = -1.0
+	var moved := false
+	for i in _shown.size():
+		if _shown[i] != group_visible[i]:
+			_shown[i] = move_toward(_shown[i], group_visible[i], dt / FADE_SECONDS)
+			moved = true
+	if moved:
+		material.set_shader_parameter("visible_groups", _shown)
 
 
 func set_width(px: float) -> void:
