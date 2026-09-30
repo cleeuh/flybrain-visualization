@@ -7,10 +7,13 @@ extends Node
 ## Activity is written into a 1-D float texture indexed by neuron id for the ribbon shader.
 ## Stimulus targets are neuropil regions (geometric membership) or neuron superclasses.
 
-signal changed
-signal pulsed     ## a pulse was delivered (by key, --stim or the auto demo)
 
-const TICK_HZ := 10.0
+const TICK_HZ := 5.0             # slow enough to follow a wave as it spreads
+## At most this fraction of neurons fires per tick; the rest of an over-threshold burst is
+## suppressed, so a pulse never floods the view with flashes (uncapped bursts reach ~12 %).
+const MAX_FIRE_FRAC := 0.012
+## The auto demo waits for the previous wave to die down before the next pulse.
+const DEMO_QUIET_FRAC := 0.002
 var leak := 0.4                # membrane potential retained per tick
 var threshold := 1.0
 var refractory := 4
@@ -33,9 +36,7 @@ var wgt := PackedFloat32Array()
 # targets: [{name, kind, members: PackedInt32Array}]
 var targets: Array = []
 var target_idx := 0
-var tonic := false
 var auto_demo := false
-var paused := false
 var _auto_timer := 0.0
 
 var v := PackedFloat32Array()
@@ -123,13 +124,6 @@ func target() -> Dictionary:
 	return targets[target_idx] if targets.size() > 0 else {}
 
 
-func select_target(step: int) -> void:
-	if targets.is_empty():
-		return
-	target_idx = posmod(target_idx + step, targets.size())
-	changed.emit()
-
-
 func pulse() -> void:
 	_pending_pulse = true
 
@@ -137,22 +131,20 @@ func pulse() -> void:
 func reset() -> void:
 	v.fill(0.0); act.fill(0.0); refr.fill(0); adapt.fill(0.0)
 	fired = PackedInt32Array()
-	tonic = false
 	_push_texture()
 
 
 func _process(dt: float) -> void:
-	if not loaded or paused:
+	if not loaded:
 		return
 	if auto_demo:
 		_auto_timer -= dt
-		if _auto_timer <= 0.0:
-			_auto_timer = randf_range(4.0, 7.0)
+		if _auto_timer <= 0.0 and fired.size() <= int(DEMO_QUIET_FRAC * n):
+			_auto_timer = randf_range(8.0, 12.0)
 			# favour region targets for the demo
 			var k := randi() % targets.size()
 			target_idx = k
 			_pending_pulse = true
-			changed.emit()
 	_acc += dt
 	while _acc >= 1.0 / TICK_HZ:
 		_acc -= 1.0 / TICK_HZ
@@ -170,15 +162,13 @@ func _tick() -> void:
 			var j := col[e]
 			input[j] += s * wgt[e]
 	# 2. stimulus
-	if (_pending_pulse or tonic) and not targets.is_empty():
-		var drive := STIM_DRIVE * (1.6 if _pending_pulse else 0.5)
-		if _pending_pulse:
-			pulsed.emit()
+	if _pending_pulse and not targets.is_empty():
+		var drive := STIM_DRIVE * 1.6
 		for i in target().members:
 			input[i] += drive * randf_range(0.6, 1.4)
 		_pending_pulse = false
 	# 3. integrate, fire, decay
-	var new_fired := PackedInt32Array()
+	var candidates := PackedInt32Array()
 	var active_frac := float(fired.size()) / n
 	var thr := threshold * (1.0 + homeostasis * active_frac)   # global damping against runaway bursts
 	for i in n:
@@ -189,15 +179,24 @@ func _tick() -> void:
 			refr[i] -= 1
 			vi = minf(vi, 0.0)
 		elif vi > thr + ad:
-			new_fired.append(i)
-			a = 1.0
-			vi = 0.0
-			refr[i] = refractory
-			ad += adapt_step
+			candidates.append(i)
 		v[i] = maxf(vi, -2.0)
 		act[i] = a
 		adapt[i] = ad
-	fired = new_fired
+	# 4. cap the burst: a random subset fires, the rest are reset without spiking
+	var cap := maxi(int(MAX_FIRE_FRAC * n), 1)
+	if candidates.size() > cap:
+		var order := Array(candidates)
+		order.shuffle()
+		for k in range(cap, order.size()):
+			v[order[k]] = 0.0
+		candidates = PackedInt32Array(order.slice(0, cap))
+	for i in candidates:
+		act[i] = 1.0
+		v[i] = 0.0
+		refr[i] = refractory
+		adapt[i] += adapt_step
+	fired = candidates
 	spikes_per_s = lerpf(spikes_per_s, fired.size() * TICK_HZ, 0.3)
 
 

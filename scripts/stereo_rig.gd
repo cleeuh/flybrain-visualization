@@ -7,16 +7,12 @@ extends Control
 ## shaders/stereo_composite.gdshader in the format the display expects:
 ##   SBS_HALF     one frame, eyes squeezed side by side        ("single input" 3D TVs / walls)
 ##   SBS_FULL     window two frames wide, each eye full-res     (dual-output walls, or one 2x-wide input)
-##   WALL         physical powerwall: two full-res eye images side by side in a borderless
-##                window, off-axis frustums derived from the wall's real size, viewer distance
-##                and eye separation (addons/stereo_wall_display, UH LAVA, MIT). The orbit
-##                target always sits on the wall plane; zooming rescales the world.
 ##   MONO         single camera
 
-enum Mode { SBS_HALF, SBS_FULL, WALL, MONO }
-const MODE_NAMES := ["SBS half", "SBS full", "wall", "mono"]
+enum Mode { SBS_HALF, SBS_FULL, MONO }
+const MODE_NAMES := ["SBS half", "SBS full", "mono"]
 const MODE_KEYS := {"half": Mode.SBS_HALF, "sbs": Mode.SBS_HALF, "full": Mode.SBS_FULL,
-	"wall": Mode.WALL, "mono": Mode.MONO}
+	"mono": Mode.MONO}
 
 @export var mode: Mode = Mode.SBS_HALF
 @export var swap_eyes := false
@@ -27,19 +23,10 @@ const MODE_KEYS := {"half": Mode.SBS_HALF, "sbs": Mode.SBS_HALF, "full": Mode.SB
 @export var hfov_deg := 70.0
 ## Fraction of the frame width to push the rendered image left, so the story panel on the
 ## right does not sit on top of the subject. Lens shift, not a camera move, so it survives
-## the rig rotating; ignored in WALL mode, whose frustums come from the physical screen.
+## the rig rotating.
 var view_shift := 0.0
 @export var near := 2.0
 @export var far := 20000.0
-
-@export_group("Wall (metres / pixels)", "wall_")
-## Defaults are the UH LAVA wall (addons/stereo_wall_display).
-@export var wall_width := 6.047
-@export var wall_height := 2.042
-@export var wall_distance := 2.282       ## viewer to wall plane
-@export var wall_eye_separation := 0.063
-@export var wall_eye_width := 4800       ## pixels per eye
-@export var wall_eye_height := 1620
 
 ## Node3D whose global transform is the "head" (between the eyes).
 var head: Node3D
@@ -110,29 +97,18 @@ func eye_aspect() -> float:
 	return float(vp.x) / maxf(float(vp.y), 1.0)
 
 
-## Borderless window at (0,0) sized for two eye images side by side, as the wall expects.
-func apply_wall_window() -> void:
-	var w := get_window()
-	w.mode = Window.MODE_WINDOWED
-	w.borderless = true
-	w.position = Vector2i.ZERO
-	w.size = Vector2i(wall_eye_width * 2, wall_eye_height)
-	w.grab_focus()
-	_layout()
-
-
 func _layout() -> void:
 	var win := Vector2i(get_viewport().get_visible_rect().size)
 	# Each eye is rendered at the resolution it will finally be shown at, then the composite
 	# shader packs the two. SBS half renders full-res so the display's un-squeeze restores
 	# the correct aspect.
 	var frame := win
-	if mode == Mode.SBS_FULL or mode == Mode.WALL:
+	if mode == Mode.SBS_FULL:
 		frame = Vector2i(win.x / 2, win.y)
 	for vp in _views:
 		vp.size = frame
 	_views[1].render_target_update_mode = SubViewport.UPDATE_DISABLED if mode == Mode.MONO else SubViewport.UPDATE_ALWAYS
-	var pattern: int = {Mode.SBS_HALF: 0, Mode.SBS_FULL: 0, Mode.WALL: 0, Mode.MONO: 1}[mode]
+	var pattern: int = {Mode.SBS_HALF: 0, Mode.SBS_FULL: 0, Mode.MONO: 1}[mode]
 	_mat.set_shader_parameter("pattern", pattern)
 
 
@@ -140,9 +116,6 @@ func _process(_dt: float) -> void:
 	if head == null:
 		return
 	var xf := head.global_transform
-	if mode == Mode.WALL:
-		_update_wall_cameras(xf)
-		return
 	var conv := maxf(target_distance * convergence_factor, near * 2.0)
 	var ipd := conv * ipd_ratio
 	var size := 2.0 * near * tan(deg_to_rad(hfov_deg) * 0.5)   # near-plane width
@@ -167,48 +140,3 @@ func _process(_dt: float) -> void:
 		c.frustum_offset = Vector2(shift - eye * (ipd * 0.5) * near / conv, 0.0)
 		c.global_transform = xf.translated(xf.basis.x * (eye * ipd * 0.5))
 
-
-## Scene units per metre in wall mode: the orbit target (brain centre) is placed exactly on
-## the wall plane, so zooming the orbit rig rescales the world instead of moving through it.
-func wall_units_per_metre() -> float:
-	return target_distance / wall_distance
-
-
-## Generalised (Kooima) off-axis projection from the physical screen corners, as in
-## addons/stereo_wall_display/stereo_wall_display.gd, done in scene units.
-func _update_wall_cameras(head_xf: Transform3D) -> void:
-	var k := wall_units_per_metre()
-	var half_w := wall_width * 0.5 * k
-	var half_h := wall_height * 0.5 * k
-	var dist := wall_distance * k
-	var b := head_xf.basis
-	var head_pos := head_xf.origin
-	var screen_bl := head_pos + b * Vector3(-half_w, -half_h, -dist)
-	var screen_br := head_pos + b * Vector3(half_w, -half_h, -dist)
-	var screen_tl := head_pos + b * Vector3(-half_w, half_h, -dist)
-	var sep := wall_eye_separation * 0.5 * k
-	for i in 2:
-		var eye := -1.0 if i == 0 else 1.0
-		if swap_eyes:
-			eye = -eye
-		_apply_offaxis(_cams[i], head_pos + b.x * (eye * sep), screen_bl, screen_br, screen_tl)
-
-
-func _apply_offaxis(camera: Camera3D, eye_pos: Vector3, bl: Vector3, br: Vector3, tl: Vector3) -> void:
-	var vr := (br - bl).normalized()
-	var vu := (tl - bl).normalized()
-	var vn := vr.cross(vu).normalized()
-	var va := bl - eye_pos
-	var vb := br - eye_pos
-	var vc := tl - eye_pos
-	var d := -va.dot(vn)
-	if d <= near:
-		return
-	var n := near
-	var l := vr.dot(va) * n / d
-	var r := vr.dot(vb) * n / d
-	var bo := vu.dot(va) * n / d
-	var t := vu.dot(vc) * n / d
-	camera.keep_aspect = Camera3D.KEEP_HEIGHT
-	camera.set_frustum(t - bo, Vector2((r + l) * 0.5, (t + bo) * 0.5), n, far)
-	camera.global_transform = Transform3D(Basis(vr, vu, vn), eye_pos)

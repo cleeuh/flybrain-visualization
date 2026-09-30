@@ -18,7 +18,4 @@ func _initialize() -> void:
 			story._lit.size(), story.panel_text().length()])
 		if s.has("rois") and story._lit.is_empty():
 			push_error("slide %d matched no ROIs: %s" % [i + 1, str(s.rois)])
-	story.stop()
-	await process_frame
-	print("stopped; shells back to alpha ", story._alpha(main.shell_nodes[0].material_override))
 	quit()

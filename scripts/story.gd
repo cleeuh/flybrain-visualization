@@ -21,7 +21,7 @@ extends Node
 ##   yaw/pitch camera angles in degrees
 ##   zoom      padding on the computed framing distance (>1 pulls back, <1 crops in)
 ##   classes   neuron superclasses to show; omitted / empty = all
-##   credits   true on the closing slide: appends CREDITS and the restart / explore choice
+##   credits   true on the closing slide: appends CREDITS; → from it starts over
 
 const SHELL_BASE_ALPHA := 0.25
 const ROI_ALPHA := 0.75   ## lit neuropil opacity, scaled down when a slide lights many
@@ -32,7 +32,7 @@ const VIEW_SHIFT := 0.16
 
 const SLIDES: Array[Dictionary] = [
 	{
-		"title": "The Fruit Fly",
+		"title": "Meet the fruit fly",
 		"sci": "Drosophila melanogaster (Meigen, 1830)",
 		"abbr": "≈ 2.5 mm · ≈ 140 000 neurons",
 		"body": "Two and a half millimetres of animal, hovering in front of you. It walks, flies, "
@@ -44,8 +44,8 @@ const SLIDES: Array[Dictionary] = [
 		"yaw": 200.0, "pitch": -10.0, "zoom": 1.2, "hover": true,
 	},
 	{
-		"title": "The nervous system inside",
-		"sci": "Systema nervosum centrale",
+		"title": "Inside the fly",
+		"sci": "Central nervous system · Systema nervosum centrale",
 		"abbr": "brain + ventral nerve cord",
 		"body": "The body turns to glass. What is left is everything the fly does its thinking "
 			+ "with: a brain filling the head and a ventral nerve cord running through the thorax, "
@@ -55,7 +55,7 @@ const SLIDES: Array[Dictionary] = [
 		"focus": "cns", "fly": 0.0, "shell": 1.0, "yaw": 200.0, "pitch": -10.0, "zoom": 1.25,
 	},
 	{
-		"title": "Into the brain",
+		"title": "The brain",
 		"sci": "Cerebrum — supraoesophageal + gnathal ganglia",
 		"abbr": "≈ 3 × 10⁵ µm³",
 		"body": "The outer shell dissolves and we drop into the head. What is left is the wiring: "
@@ -65,8 +65,8 @@ const SLIDES: Array[Dictionary] = [
 		"focus": "brain", "shell": 0.0, "yaw": 0.0, "pitch": -8.0, "zoom": 1.25,
 	},
 	{
-		"title": "Optic lobes",
-		"sci": "Lobus opticus — lamina, medulla, lobula, lobula plate",
+		"title": "Vision",
+		"sci": "Optic lobes · Lobus opticus — lamina, medulla, lobula, lobula plate",
 		"abbr": "LA · ME · LO · LOP · AME",
 		"body": "More than half the brain is devoted to seeing. Each compound eye feeds ~800 "
 			+ "retinotopic columns that stack through the lamina and medulla into the lobula complex.\n\n"
@@ -77,8 +77,8 @@ const SLIDES: Array[Dictionary] = [
 		"classes": ["ol_intrinsic", "ol_sensory", "visual_projection", "visual_centrifugal"],
 	},
 	{
-		"title": "Antennal lobe",
-		"sci": "Lobus antennalis",
+		"title": "Smell",
+		"sci": "Antennal lobe · Lobus antennalis",
 		"abbr": "AL",
 		"body": "The first olfactory relay, the insect counterpart of the vertebrate olfactory bulb. "
 			+ "Olfactory receptor neurons on the antenna and maxillary palp sort themselves by "
@@ -88,10 +88,10 @@ const SLIDES: Array[Dictionary] = [
 		"rois": ["AL"], "shell": 0.0, "yaw": 0.0, "pitch": 5.0, "zoom": 1.25,
 	},
 	{
-		"title": "Mushroom body",
-		"sci": "Corpus pedunculatum",
+		"title": "Learning and memory",
+		"sci": "Mushroom body · Corpus pedunculatum",
 		"abbr": "CA · PED · αL · α'L · βL · β'L · γL",
-		"body": "Learning and memory. ~2 000 Kenyon cells per side take a sparse, near-random sample "
+		"body": "About 2 000 Kenyon cells per side take a sparse, near-random sample "
 			+ "of projection-neuron input in the calyx (CA), then run in a tight bundle down the "
 			+ "peduncle (PED) and split into the α/β, α'/β' and γ lobes.\n\n"
 			+ "Dopaminergic neurons write reward and punishment onto those lobes compartment by "
@@ -100,8 +100,8 @@ const SLIDES: Array[Dictionary] = [
 		"rois": ["CA", "PED", "aL", "a'L", "bL", "b'L", "gL"], "shell": 0.0, "yaw": -20.0, "pitch": 0.0, "zoom": 1.25,
 	},
 	{
-		"title": "Lateral horn",
-		"sci": "Cornu laterale",
+		"title": "Instinct",
+		"sci": "Lateral horn · Cornu laterale",
 		"abbr": "LH",
 		"body": "The innate half of the olfactory system. The same projection neurons that teach the "
 			+ "mushroom body also terminate here, in a stereotyped map that is wired before the fly "
@@ -111,8 +111,8 @@ const SLIDES: Array[Dictionary] = [
 		"rois": ["LH"], "shell": 0.0, "yaw": -35.0, "pitch": 0.0, "zoom": 1.25,
 	},
 	{
-		"title": "Central complex",
-		"sci": "Complexus centralis",
+		"title": "Finding the way",
+		"sci": "Central complex · Complexus centralis",
 		"abbr": "EB · FB · PB · NO",
 		"body": "The fly's compass and steering committee, straddling the midline. Ring neurons and "
 			+ "EPG cells in the ellipsoid body (EB) hold a single bump of activity that tracks "
@@ -124,7 +124,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Hearing and touch",
-		"sci": "Centrum mechanosensorium antennale et motorium",
+		"sci": "AMMC and wedge · Centrum mechanosensorium antennale et motorium",
 		"abbr": "AMMC · WED · SAD",
 		"body": "The antenna is also an ear. Johnston's organ, at its base, converts the vibration of "
 			+ "the arista into spikes that arrive here, in the antennal mechanosensory and motor "
@@ -135,8 +135,8 @@ const SLIDES: Array[Dictionary] = [
 		"rois": ["AMMC", "WED", "SAD"], "shell": 0.0, "yaw": 15.0, "pitch": 10.0, "zoom": 1.25,
 	},
 	{
-		"title": "Gnathal ganglia",
-		"sci": "Ganglion gnathale (subesophageal zone)",
+		"title": "Taste and eating",
+		"sci": "Gnathal ganglia · Ganglion gnathale (subesophageal zone)",
 		"abbr": "GNG · PRW · FLA",
 		"body": "The mouth's brain, fused to the underside of the rest. Taste bristles on the "
 			+ "proboscis, legs and wing margins report here, and the motor neurons that extend the "
@@ -147,8 +147,8 @@ const SLIDES: Array[Dictionary] = [
 		"rois": ["GNG", "PRW", "FLA"], "shell": 0.0, "yaw": 0.0, "pitch": 20.0, "zoom": 1.25,
 	},
 	{
-		"title": "Down the neck",
-		"sci": "Connectivum cervicale — descending neurons",
+		"title": "From brain to body",
+		"sci": "Neck connective · Connectivum cervicale — descending neurons",
 		"abbr": "≈ 1 300 DNs",
 		"body": "Only about 1 300 descending neurons per side carry the brain's decisions into the "
 			+ "body — a famously narrow channel. Each one is closer to a command than to a wire: "
@@ -159,8 +159,8 @@ const SLIDES: Array[Dictionary] = [
 		"classes": ["descending_neuron", "ascending_neuron", "sensory_ascending"],
 	},
 	{
-		"title": "Ventral nerve cord",
-		"sci": "Ganglion thoracicoabdominale",
+		"title": "Walking and flying",
+		"sci": "Ventral nerve cord · Ganglion thoracicoabdominale",
 		"abbr": "LegNp(T1–T3) · WTct · HTct · NTct · ANm",
 		"body": "The fly's spinal cord, and the place where movement is actually produced. Three leg "
 			+ "neuropils (T1–T3) each hold the sensory input and motor neurons of one pair of legs, "
@@ -172,7 +172,7 @@ const SLIDES: Array[Dictionary] = [
 		"classes": ["vnc_intrinsic", "vnc_sensory", "vnc_motor", "vnc_efferent", "descending_neuron", "ascending_neuron"],
 	},
 	{
-		"title": "One nervous system",
+		"title": "The whole picture",
 		"sci": "Drosophila melanogaster — male CNS connectome v1.0",
 		"body": "Back out to the whole animal. Smell, sight, hearing, memory, a compass and six legs, "
 			+ "all in a volume smaller than a poppy seed — and all of it now traced synapse by synapse.",
@@ -185,7 +185,7 @@ const CREDITS := [
 	["Data", "FlyEM / Janelia male adult CNS connectome, male-cns v1.0 (CC-BY 4.0)"],
 	["", "male-cns.janelia.org/download"],
 	["Rendering", "Godot 4.7 · additive screen-space ribbons, one MultiMesh"],
-	["Stereo", "off-axis side-by-side; powerwall projection from addons/stereo_wall_display (UH LAVA, MIT)"],
+	["Stereo", "off-axis side-by-side"],
 ]
 
 signal changed
@@ -200,12 +200,11 @@ var _fly: Fly
 var _shell_mats: Array[ShaderMaterial] = []
 var _rois: Dictionary = {}            # name -> MeshInstance3D
 var _roi_mats: Dictionary = {}        # name -> story material (created lazily)
-var _orig_mats: Dictionary = {}       # name -> material the viewer mode uses
+var _orig_mats: Dictionary = {}       # name -> material the ROI had before the tour lit it
 var _lit: Array[String] = []          # ROI names lit by the current slide
 var _fading: Array[String] = []       # ROI names on their way out
 var _shell_nodes: Array[MeshInstance3D] = []
 var _tween: Tween
-var _saved := {}
 
 
 func setup(rig: OrbitRig, stereo: StereoRig, neurons: Neurons, fly: Fly,
@@ -226,64 +225,21 @@ func slide() -> Dictionary:
 
 
 func start(from := 0) -> void:
-	if active:
-		return
-	_saved = {
-		"auto_rotate": _rig.auto_rotate,
-		"pivot": _rig.position,
-		"yaw": _rig.yaw_deg, "pitch": _rig.pitch_deg, "dist": _rig.distance,
-		"visible": _neurons.group_visible.duplicate(),
-	}
 	active = true
-	_rig.arrows_enabled = false
-	if _stereo.mode != StereoRig.Mode.WALL:
-		_stereo.view_shift = VIEW_SHIFT
+	_stereo.view_shift = VIEW_SHIFT
 	index = clampi(from, 0, SLIDES.size() - 1)
 	_apply()
 
 
-func stop() -> void:
-	if not active:
-		return
-	active = false
-	_rig.arrows_enabled = true
-	_stereo.view_shift = 0.0
-	_kill_tween()
-	for m in _shell_mats:
-		_set_alpha(SHELL_BASE_ALPHA, m)
-	_fly.flying = false
-	_fly.set_alpha(0.0)
-	_neurons.visible = true
-	for name in _lit:
-		_unlight(name)
-	_lit.clear()
-	_fading.clear()
-	if _saved.has("visible"):
-		for g in _neurons.groups:
-			_neurons.set_group_visible(int(g.id), _saved.visible[int(g.id)] > 0.5)
-	_rig.auto_rotate = _saved.get("auto_rotate", true)
-	_rig.goto(_saved.get("pivot", Vector3.ZERO), _saved.get("yaw", 0.0), _saved.get("pitch", -15.0),
-		_saved.get("dist", 1600.0))
-	changed.emit()
-
-
+## → past the closing slide loops back to the opening one; ← stops at the first.
 func step(dir: int) -> void:
-	if not active:
-		return
 	var n := index + dir
-	if n >= SLIDES.size() or n < 0:
-		stop()          # walking off either end returns to free flight
+	if n >= SLIDES.size():
+		n = 0
+	elif n < 0:
 		return
 	index = n
 	_apply()
-
-
-## Back to the first slide (the closing slide offers this).
-func restart() -> void:
-	if active:
-		goto_slide(0)
-	else:
-		start(0)
 
 
 func goto_slide(i: int) -> void:
@@ -469,9 +425,9 @@ func panel_text() -> String:
 		t += _credits_text()
 	t += "\n[color=#666]%s[/color]\n" % _progress_bar()
 	if s.get("credits", false):
-		t += "[color=#8f8]R: start over[/color]   [color=#8f8]→ or V: explore it yourself[/color]"
+		t += "[color=#8f8]→ start over[/color]"
 	else:
-		t += "[color=#777]← → slides   R: start over   V: explore[/color]"
+		t += "[color=#777]← → slides[/color]"
 	return t
 
 
@@ -485,8 +441,8 @@ func _credits_text() -> String:
 			t += "[color=#888]%s[/color]\n" % c[1]
 		else:
 			t += "[color=#e8c27a]%s[/color]  [color=#aaa]%s[/color]\n" % [c[0], c[1]]
-	t += "\n[color=#888]Explore mode: drag or A/D/W/S to orbit, Q/E to zoom, Tab to pick a region, "
-	t += "Enter to stimulate it and watch activity spread across the real synaptic graph.[/color]\n"
+	t += "\n[color=#888]The flashes are simulated activity: random regions are stimulated and spikes "
+	t += "spread across the real synaptic graph.[/color]\n"
 	return t
 
 

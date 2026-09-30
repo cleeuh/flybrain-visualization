@@ -1,6 +1,9 @@
 class_name OrbitRig
 extends Node3D
 ## Orbit camera pivot: this node sits at the target; `head` is offset along +Z by `distance`.
+## The tour frames each slide (goto + auto_rotate); the viewer can still orbit (drag, WASD)
+## and zoom (wheel, Q/E) around that framing until the next slide takes over. The arrow keys
+## belong to slide navigation.
 
 @export var distance := 1600.0
 @export var yaw_deg := 0.0
@@ -9,8 +12,6 @@ extends Node3D
 @export var auto_rotate_speed := 6.0   # deg / s
 @export var min_distance := 50.0
 @export var max_distance := 8000.0
-## Story mode takes the left / right arrows over for slide navigation.
-var arrows_enabled := true
 
 @onready var head: Node3D = $Head
 
@@ -54,13 +55,13 @@ func _unhandled_input(e: InputEvent) -> void:
 
 func _process(dt: float) -> void:
 	var spd := 60.0 * dt
-	if (Input.is_key_pressed(KEY_LEFT) and arrows_enabled) or Input.is_key_pressed(KEY_A):
+	if Input.is_key_pressed(KEY_A):
 		_yaw_target += spd; auto_rotate = false
-	if (Input.is_key_pressed(KEY_RIGHT) and arrows_enabled) or Input.is_key_pressed(KEY_D):
+	if Input.is_key_pressed(KEY_D):
 		_yaw_target -= spd; auto_rotate = false
-	if (Input.is_key_pressed(KEY_UP) and arrows_enabled) or Input.is_key_pressed(KEY_W):
+	if Input.is_key_pressed(KEY_W):
 		_pitch_target = clampf(_pitch_target + spd, -89, 89); auto_rotate = false
-	if (Input.is_key_pressed(KEY_DOWN) and arrows_enabled) or Input.is_key_pressed(KEY_S):
+	if Input.is_key_pressed(KEY_S):
 		_pitch_target = clampf(_pitch_target - spd, -89, 89); auto_rotate = false
 	if Input.is_key_pressed(KEY_Q) or Input.is_key_pressed(KEY_PAGEUP):
 		_dist_target *= 1.0 - dt

@@ -1,13 +1,11 @@
 extends Node
-## Male CNS connectome viewer — glue: loads data, builds the scene, handles keys and UI.
+## Male CNS connectome viewer — glue: loads data, builds the scene, runs the guided tour.
+## The tour is the whole app: ← → step slides, drag / WASD orbit, wheel / Q E zoom,
+## T cycles the 3D format, F toggles fullscreen.
 ##
-## Command line (after `++`):  --3d=half|full|wall|mono  --swap  --story[=N] / --no-story
+## Command line (after `++`):  --3d=half|full|mono  --swap  --story=N  --windowed (starts fullscreen)
 ##                              --ipd=0.033  --conv=1.0  --fov=70  --width=1.2  --brightness=0.02
-##                              --rois  --no-shells  --no-rotate  --windowed  (starts fullscreen)
-##                              --help=0  --demo  --stim="AL(R)"  --no-anim
-##
-## Wall geometry is configuration, not flags: pick the wall format with T, set the metres /
-## pixels in user://flyviz.cfg, press C to save, and it is applied on the next start.
+##                              --no-anim  --screenshot=path
 
 const CONFIG_PATH := "user://flyviz.cfg"
 
@@ -16,27 +14,19 @@ const CONFIG_PATH := "user://flyviz.cfg"
 @onready var stereo: StereoRig = $Stereo
 
 var neurons: Neurons
-var shells: Node3D
 var shell_nodes: Array[MeshInstance3D] = []
 var story: Story
 var fly: Fly
 var story_panels: Array[PanelContainer] = []
 var story_labels: Array[RichTextLabel] = []
 var rois: Node3D
-var legends: Array[Control] = []
-var help_visible := true
+var hints: Array[RichTextLabel] = []         ## key hints, bottom left of each eye
 var ribbon_width := 1.2
 var brightness := 0.02
-var highlight_idx := -1
 var sim: Sim
-var sim_on := false
 var roi_by_name: Dictionary = {}
-var show_rois := false
-var _stim_material: ShaderMaterial
-var _story_on_start := true
-var animations := true               ## ambient motion (glints, waves, motes, fades); Z toggles
-var _anim_tween: Tween
-var _stim_flash: Tween
+var animations := true               ## ambient motion (waves, motes, fades); --no-anim turns it off
+var _start_slide := 0
 var _panel_tween: Tween
 var _panel_slide := 0.0              ## narration panel's slide-in offset, px
 var _panel_slide_index := -1
@@ -60,45 +50,34 @@ func _ready() -> void:
 	add_child(sim)
 	if sim.load_data(neurons):
 		neurons.set_activity_texture(sim.texture)
-		sim.changed.connect(_on_sim_changed)
-		sim.pulsed.connect(_flash_stim)
-	_stim_material = _shell_material(Color(1.0, 0.95, 0.6, 1.0), 0.12, 0.9)
+		neurons.set_sim_active(true)
+		sim.auto_demo = true             # random stimuli keep the connectome alive through the tour
 	story = Story.new()
 	story.name = "Story"
 	add_child(story)
 	story.setup(rig, stereo, neurons, fly, shell_nodes, roi_by_name)
 	story.changed.connect(_update_ui)
 	_apply_cmdline()
-	if _story_on_start and not story.active:
-		story.start()                    # the tour is the default entry point (--no-story skips it)
-	elif not story.active and animations:
-		neurons.reveal()                 # free flight: grow the connectome in once at start
-	_set_animations(animations, true)
+	story.start(_start_slide)
+	RenderingServer.global_shader_parameter_set("anim_level", 1.0 if animations else 0.0)
 	neurons.set_width(ribbon_width)
 	neurons.set_brightness(brightness)
 	_build_ui()
 	_update_ui()
 
 
-var _ui_timer := 0.0
 var _shot_path := ""
 var _shot_timer := 0.0
 
 
 func _process(dt: float) -> void:
 	stereo.target_distance = rig.distance
-	if story != null and story.active:
-		_place_story_panels()
+	_place_story_panels()
 	if _shot_path != "":
 		_shot_timer -= dt
 		if _shot_timer <= 0.0:
 			_save_screenshot(_shot_path)
 			get_tree().quit()
-	if sim_on:
-		_ui_timer -= dt
-		if _ui_timer <= 0.0:
-			_ui_timer = 0.25
-			_update_ui()
 
 
 # --------------------------------------------------------------------------- scene
@@ -128,7 +107,7 @@ func _shell_material(color: Color, fill: float, rim: float) -> ShaderMaterial:
 
 
 func _build_meshes() -> void:
-	shells = Node3D.new()
+	var shells := Node3D.new()
 	shells.name = "Shells"
 	scene_root.add_child(shells)
 	for n in ["brain_shell", "vnc_shell"]:
@@ -174,129 +153,15 @@ func _build_meshes() -> void:
 func _unhandled_key_input(e: InputEvent) -> void:
 	if not (e is InputEventKey and e.pressed and not e.echo):
 		return
-	var k: int = e.keycode
-	var shift: bool = e.shift_pressed
-	match k:
+	match e.keycode:
 		KEY_ESCAPE: get_tree().quit()
-		KEY_V: _toggle_story()
-		KEY_RIGHT, KEY_LEFT:
-			if not story.active:
-				return                       # arrows orbit in free flight (polled by OrbitRig)
-			story.step(1 if k == KEY_RIGHT else -1)
-		KEY_F11, KEY_F: _toggle_fullscreen()
-		KEY_F12: _save_screenshot("user://screenshot_%s.png" % Time.get_datetime_string_from_system().replace(":", "-"))
-		KEY_H: help_visible = not help_visible
-		KEY_Z: _set_animations(not animations)
-		KEY_SPACE: rig.auto_rotate = not rig.auto_rotate
-		KEY_B: shells.visible = not shells.visible
-		KEY_R:
-			if story.active:
-				story.restart()
-			else:
-				show_rois = not show_rois; _refresh_rois()
-		KEY_T: stereo.cycle_mode()
-		KEY_X: stereo.swap_eyes = not stereo.swap_eyes
-		KEY_BRACKETLEFT: stereo.ipd_ratio = maxf(stereo.ipd_ratio / 1.15, 0.001)
-		KEY_BRACKETRIGHT: stereo.ipd_ratio = minf(stereo.ipd_ratio * 1.15, 0.2)
-		KEY_MINUS: stereo.convergence_factor = maxf(stereo.convergence_factor / 1.1, 0.2)
-		KEY_EQUAL: stereo.convergence_factor = minf(stereo.convergence_factor * 1.1, 5.0)
-		KEY_COMMA: ribbon_width = maxf(ribbon_width - 0.5, 0.5); neurons.set_width(ribbon_width)
-		KEY_PERIOD: ribbon_width = minf(ribbon_width + 0.5, 12.0); neurons.set_width(ribbon_width)
-		KEY_SEMICOLON: brightness = maxf(brightness / 1.25, 0.005); neurons.set_brightness(brightness)
-		KEY_APOSTROPHE: brightness = minf(brightness * 1.25, 2.0); neurons.set_brightness(brightness)
-		KEY_N: _step_highlight(-1 if shift else 1)
-		KEY_M: highlight_idx = -1; neurons.set_highlight(-1)
-		KEY_C: _save_config()
-		KEY_TAB: sim.select_target(-1 if shift else 1)
-		KEY_ENTER, KEY_KP_ENTER: _set_sim(true); sim.pulse()
-		KEY_L: _set_sim(true); sim.tonic = not sim.tonic
-		KEY_G: _set_sim(true); sim.auto_demo = not sim.auto_demo
-		KEY_P: sim.paused = not sim.paused
-		KEY_K: sim.reset(); sim.auto_demo = false; _set_sim(false)
-		KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
-			var n := (k - KEY_0 + 9) % 10          # 1..9 -> 0..8, 0 -> 9
-			if shift:
-				n += 10
-			if n < neurons.groups.size():
-				neurons.toggle_group(n)
-		KEY_ASCIITILDE, KEY_QUOTELEFT:
-			var any_hidden := false
-			for g in neurons.groups:
-				if neurons.group_visible[int(g.id)] < 0.5:
-					any_hidden = true
-			neurons.set_all_visible(any_hidden)
+		KEY_RIGHT: story.step(1)
+		KEY_LEFT: story.step(-1)
+		KEY_T: stereo.cycle_mode(); _save_config()
+		KEY_F, KEY_F11: _toggle_fullscreen()
 		_:
 			return
 	_update_ui()
-
-
-func _toggle_story() -> void:
-	if story.active:
-		story.stop()
-		_refresh_rois()
-	else:
-		shells.visible = true
-		story.start()
-
-
-## Ambient animation on / off, eased so it never pops. Everything animated reads the
-## anim_level shader global, so this is the one switch.
-func _set_animations(on: bool, instant := false) -> void:
-	animations = on
-	if _anim_tween != null and _anim_tween.is_valid():
-		_anim_tween.kill()
-	var target := 1.0 if on else 0.0
-	if instant:
-		RenderingServer.global_shader_parameter_set("anim_level", target)
-		return
-	var from: float = RenderingServer.global_shader_parameter_get("anim_level")
-	_anim_tween = create_tween()
-	_anim_tween.tween_method(func(v: float): RenderingServer.global_shader_parameter_set("anim_level", v),
-		from, target, 0.6)
-
-
-## A stimulated neuropil flares and settles back to its highlight, so the pulse has a visible cause.
-func _flash_stim() -> void:
-	if _stim_flash != null and _stim_flash.is_valid():
-		_stim_flash.kill()
-	_stim_flash = create_tween().set_parallel(true).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	_stim_flash.tween_method(func(v: float): _stim_material.set_shader_parameter("fill", v), 0.7, 0.12, 0.9)
-	_stim_flash.tween_method(func(v: float): _stim_material.set_shader_parameter("rim", v), 2.4, 0.9, 0.9)
-
-
-func _set_sim(on: bool) -> void:
-	if not sim.loaded:
-		return
-	sim_on = on
-	neurons.set_sim_active(on)
-	_on_sim_changed()
-
-
-## Neuropil meshes: all shown when show_rois, the stimulation target always (highlighted).
-func _refresh_rois() -> void:
-	if story != null and story.active:
-		return                               # the tour owns the neuropil meshes while it runs
-	var t := sim.target() if sim.loaded else {}
-	for name in roi_by_name:
-		var mi: MeshInstance3D = roi_by_name[name]
-		var is_target: bool = sim_on and t.get("kind", "") == "region" and t.name == name
-		mi.visible = show_rois or is_target
-		if is_target:
-			mi.material_override = _stim_material
-		elif mi.material_override == _stim_material:
-			mi.material_override = _shell_material(Color.from_hsv(fmod(mi.get_index() * 0.618033988, 1.0), 0.6, 1.0, 0.7), 0.05, 0.5)
-
-
-func _on_sim_changed() -> void:
-	_refresh_rois()
-	_update_ui()
-
-
-func _step_highlight(dir: int) -> void:
-	if neurons.index.is_empty():
-		return
-	highlight_idx = posmod(highlight_idx + dir, neurons.index.size())
-	neurons.set_highlight(highlight_idx)
 
 
 func _save_screenshot(path: String) -> void:
@@ -326,13 +191,17 @@ func _build_ui() -> void:
 		lbl.bbcode_enabled = true
 		lbl.scroll_active = false
 		lbl.fit_content = true
-		lbl.position = Vector2(24, 24)
-		lbl.size = Vector2(560, 900)
-		lbl.add_theme_font_size_override("normal_font_size", 18)
-		lbl.add_theme_font_size_override("bold_font_size", 18)
-		lbl.add_theme_font_size_override("mono_font_size", 18)
+		lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
+		lbl.add_theme_font_size_override("normal_font_size", 17)
+		var plate := StyleBoxFlat.new()          # keeps the hint legible over bright tissue
+		plate.bg_color = Color(0.02, 0.03, 0.05, 0.72)
+		plate.set_content_margin_all(10)
+		plate.content_margin_left = 14
+		plate.content_margin_right = 14
+		plate.set_corner_radius_all(6)
+		lbl.add_theme_stylebox_override("normal", plate)
 		layer.add_child(lbl)
-		legends.append(lbl)
+		hints.append(lbl)
 
 		var panel := PanelContainer.new()
 		var sb := StyleBoxFlat.new()
@@ -359,13 +228,12 @@ func _build_ui() -> void:
 
 
 func _update_story_panels() -> void:
-	var text: String = story.panel_text() if story.active else ""
-	var new_slide := story.active and story.index != _panel_slide_index
-	_panel_slide_index = story.index if story.active else -1
+	var text: String = story.panel_text()
+	var new_slide := story.index != _panel_slide_index
+	_panel_slide_index = story.index
 	for i in story_panels.size():
-		story_panels[i].visible = story.active
-		if story.active:
-			story_labels[i].text = text
+		story_panels[i].visible = true
+		story_labels[i].text = text
 	if new_slide:
 		_animate_panel_in()
 	_place_story_panels()
@@ -386,12 +254,11 @@ func _animate_panel_in() -> void:
 		_panel_tween.tween_property(p, "modulate:a", 1.0, 0.45).from(0.0)
 
 
-## Pin each eye's narration panel to the right-hand edge of its viewport. Run every frame
-## while the tour is up: the label's fit_content height only settles after a layout pass.
+## Pin each eye's narration panel to the right-hand edge of its viewport and the key hints to
+## the bottom left. Run every frame: fit_content heights only settle after a layout pass.
 func _place_story_panels() -> void:
-	for panel in story_panels:
-		if not panel.visible:
-			continue
+	for i in story_panels.size():
+		var panel := story_panels[i]
 		var layer := panel.get_parent() as CanvasLayer
 		var vp := layer.get_viewport()
 		if vp == null:
@@ -399,6 +266,9 @@ func _place_story_panels() -> void:
 		var sc: float = maxf(layer.scale.x, 0.01)
 		panel.reset_size()
 		panel.position = Vector2(vp.size.x / sc - panel.size.x - STORY_MARGIN + _panel_slide, STORY_MARGIN)
+		if i < hints.size():
+			hints[i].reset_size()
+			hints[i].position = Vector2(STORY_MARGIN, vp.size.y / sc - hints[i].size.y - STORY_MARGIN * 0.6)
 
 
 func _update_ui() -> void:
@@ -406,97 +276,31 @@ func _update_ui() -> void:
 		var vp := layer.get_viewport()
 		layer.scale = Vector2.ONE * maxf(vp.size.y / 1080.0, 0.5) if vp else Vector2.ONE
 	_update_story_panels()
-	if story.active:
-		# the tour owns the screen: everything, credits included, is in the panel on the right
-		for l in legends:
-			l.text = ""
-		return
-	var t := "[b]Drosophila male CNS connectome[/b]\n"
-	t += "[color=#aaa]%d neurons · %d skeleton segments · %s%s[/color]\n\n" % [
-		neurons.index.size(), neurons.segment_count, stereo.mode_name(), "  (eyes swapped)" if stereo.swap_eyes else ""]
-	if stereo.mode == StereoRig.Mode.WALL:
-		t += "[color=#aaa]wall %.2f × %.2f m at %.2f m, eyes %.0f mm, %d×%d per eye · 1 mm = %.1f µm[/color]\n" % [
-			stereo.wall_width, stereo.wall_height, stereo.wall_distance, stereo.wall_eye_separation * 1000,
-			stereo.wall_eye_width, stereo.wall_eye_height, stereo.wall_units_per_metre() / 1000.0]
-	var i := 0
-	for g in neurons.groups:
-		var on: bool = neurons.group_visible[int(g.id)] > 0.5
-		var key := str((i + 1) % 10) if i < 10 else "⇧%d" % ((i - 9) % 10)
-		var c := neurons.group_color(int(g.id))
-		var name: String = String(g.name).replace("_", " ")
-		t += "[color=#%s]%s[/color] [color=#666]%s[/color] %s [color=#666](%d)[/color]\n" % [
-			c.to_html(false) if on else "444", "■" if on else "□", key, name, int(g.count)]
-		i += 1
-	if sim.loaded:
-		var tg := sim.target()
-		t += "\n[b]stimulate:[/b] [color=#ffe]%s[/color] [color=#888](%s, %d neurons)[/color]" % [tg.name, tg.kind, tg.members.size()]
-		if sim_on:
-			t += "   [color=#8f8]%s%s%.0f spikes/s[/color]" % ["tonic · " if sim.tonic else "", "auto · " if sim.auto_demo else "", sim.spikes_per_s]
-		t += "\n"
-	if highlight_idx >= 0:
-		var n = neurons.index[highlight_idx]
-		t += "\n[color=#fff]highlight:[/color] body %d  %s  [%s]\n" % [int(n.bodyId), str(n.type), neurons.groups[int(n.group)].name]
-	if help_visible:
-		t += "\n[color=#777]Tab / ⇧Tab: choose region or class   Enter: pulse   L: tonic drive   G: auto demo   P: pause   K: stop sim\n"
-		t += "drag / arrows: orbit   wheel / Q E: zoom   space: auto-rotate\n"
-		t += "1-9 0 ⇧: toggle class   `: all   B: shells   R: neuropils\n"
-		t += "T: 3D format   X: swap eyes   [ ]: eye separation (%.3f)   - =: convergence (%.2f)\n" % [stereo.ipd_ratio, stereo.convergence_factor]
-		t += ", .: width (%.1f)   ; \': brightness (%.3f)   N / ⇧N: step neuron   M: clear   F: fullscreen   C: save config   H: hide help\n" % [ribbon_width, brightness]
-		t += "Z: animations (%s)   V: guided tour of the brain (← → to step through it; its last slide has the credits)[/color]" % ("on" if animations else "off")
-	for l in legends:
-		l.text = t
+	var full := get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
+	var t := "[color=#7fd4ff][b]drag[/b][/color] [color=#8a8f99]rotate[/color]      "
+	t += "[color=#7fd4ff][b]wheel[/b][/color] [color=#8a8f99]zoom[/color]      "
+	t += "[color=#7fd4ff][b]T[/b][/color] [color=#8a8f99]3D format:[/color] [color=#ddd]%s[/color]      " % stereo.mode_name()
+	t += "[color=#7fd4ff][b]F[/b][/color] [color=#8a8f99]fullscreen:[/color] [color=#ddd]%s[/color]" % ("on" if full else "off")
+	for h in hints:
+		h.text = t
 
 
 # --------------------------------------------------------------------------- config
 
+## Only the 3D format is remembered; T saves it as soon as it changes.
 func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(CONFIG_PATH) != OK:
 		return
-	# clamp: configs written before the non-SBS formats were removed may hold a stale index
+	# clamp: configs from older builds may hold an index for a format that no longer exists
 	stereo.mode = clampi(int(cfg.get_value("stereo", "mode", stereo.mode)), 0, StereoRig.Mode.size() - 1) as StereoRig.Mode
-	stereo.swap_eyes = cfg.get_value("stereo", "swap_eyes", stereo.swap_eyes)
-	stereo.ipd_ratio = cfg.get_value("stereo", "ipd_ratio", stereo.ipd_ratio)
-	stereo.convergence_factor = cfg.get_value("stereo", "convergence_factor", stereo.convergence_factor)
-	stereo.hfov_deg = cfg.get_value("stereo", "hfov_deg", stereo.hfov_deg)
-	stereo.wall_width = cfg.get_value("wall", "width_m", stereo.wall_width)
-	stereo.wall_height = cfg.get_value("wall", "height_m", stereo.wall_height)
-	stereo.wall_distance = cfg.get_value("wall", "distance_m", stereo.wall_distance)
-	stereo.wall_eye_separation = cfg.get_value("wall", "eye_separation_m", stereo.wall_eye_separation)
-	stereo.wall_eye_width = cfg.get_value("wall", "eye_width_px", stereo.wall_eye_width)
-	stereo.wall_eye_height = cfg.get_value("wall", "eye_height_px", stereo.wall_eye_height)
-	ribbon_width = cfg.get_value("view", "ribbon_width", ribbon_width)
-	brightness = cfg.get_value("view", "brightness", brightness)
-	rig.auto_rotate = cfg.get_value("view", "auto_rotate", rig.auto_rotate)
-	rig.auto_rotate_speed = cfg.get_value("view", "auto_rotate_speed", rig.auto_rotate_speed)
-	help_visible = cfg.get_value("view", "help", help_visible)
-	animations = cfg.get_value("view", "animations", animations)
 	stereo.set_mode(stereo.mode)
-	if stereo.mode == StereoRig.Mode.WALL:
-		stereo.apply_wall_window()
 
 
 func _save_config() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("stereo", "mode", stereo.mode)
-	cfg.set_value("stereo", "swap_eyes", stereo.swap_eyes)
-	cfg.set_value("stereo", "ipd_ratio", stereo.ipd_ratio)
-	cfg.set_value("stereo", "convergence_factor", stereo.convergence_factor)
-	cfg.set_value("stereo", "hfov_deg", stereo.hfov_deg)
-	cfg.set_value("wall", "width_m", stereo.wall_width)
-	cfg.set_value("wall", "height_m", stereo.wall_height)
-	cfg.set_value("wall", "distance_m", stereo.wall_distance)
-	cfg.set_value("wall", "eye_separation_m", stereo.wall_eye_separation)
-	cfg.set_value("wall", "eye_width_px", stereo.wall_eye_width)
-	cfg.set_value("wall", "eye_height_px", stereo.wall_eye_height)
-	cfg.set_value("view", "ribbon_width", ribbon_width)
-	cfg.set_value("view", "brightness", brightness)
-	cfg.set_value("view", "auto_rotate", rig.auto_rotate)
-	cfg.set_value("view", "auto_rotate_speed", rig.auto_rotate_speed)
-	cfg.set_value("view", "help", help_visible)
-	cfg.set_value("view", "animations", animations)
 	cfg.save(CONFIG_PATH)
-	print("config saved to ", ProjectSettings.globalize_path(CONFIG_PATH))
 
 
 func _apply_cmdline() -> void:
@@ -513,22 +317,8 @@ func _apply_cmdline() -> void:
 			"width": ribbon_width = float(val)
 			"brightness": brightness = float(val)
 			"swap": stereo.swap_eyes = true
-			"no-rotate": rig.auto_rotate = false
-			"rois": show_rois = true; _refresh_rois()
-			"demo": _set_sim(true); sim.auto_demo = true
-			"simon": _set_sim(true)
-			"stim":
-				for i in sim.targets.size():
-					if sim.targets[i].name == val:
-						sim.target_idx = i
-				_set_sim(true); sim.pulse()
-			"no-shells": shells.visible = false
-			"story": story.start(int(val) - 1 if val.is_valid_int() else 0)
-			"no-story": _story_on_start = false
+			"story": _start_slide = int(val) - 1 if val.is_valid_int() else 0
 			"fullscreen": get_window().mode = Window.MODE_FULLSCREEN
 			"windowed": get_window().mode = Window.MODE_WINDOWED
-			"help": help_visible = val != "0"
 			"no-anim": animations = false
 			"screenshot": _shot_path = val; _shot_timer = 2.0   # save after 2 s and quit
-	if stereo.mode == StereoRig.Mode.WALL:
-		stereo.apply_wall_window()          # --3d=wall: size the window from the [wall] config
