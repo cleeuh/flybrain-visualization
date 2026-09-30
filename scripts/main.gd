@@ -20,7 +20,7 @@ var fly: Fly
 var story_panels: Array[PanelContainer] = []
 var story_labels: Array[RichTextLabel] = []
 var rois: Node3D
-var hints: Array[RichTextLabel] = []         ## key hints, bottom left of each eye
+var hints: Array[RichTextLabel] = []         ## key strip, bottom left of each eye
 var ribbon_width := 1.2
 var brightness := 0.02
 var sim: Sim
@@ -192,34 +192,32 @@ func _build_ui() -> void:
 		lbl.scroll_active = false
 		lbl.fit_content = true
 		lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
-		lbl.add_theme_font_size_override("normal_font_size", 17)
-		var plate := StyleBoxFlat.new()          # keeps the hint legible over bright tissue
-		plate.bg_color = Color(0.02, 0.03, 0.05, 0.72)
-		plate.set_content_margin_all(10)
-		plate.content_margin_left = 14
-		plate.content_margin_right = 14
-		plate.set_corner_radius_all(6)
+		lbl.add_theme_font_override("normal_font", UITheme.mono())
+		lbl.add_theme_font_size_override("normal_font_size", 15)
+		var plate := UITheme.panel(12)           # keeps the strip legible over bright tissue
+		plate.content_margin_left = 18
+		plate.content_margin_right = 18
 		lbl.add_theme_stylebox_override("normal", plate)
+		UITheme.add_brackets(lbl)
 		layer.add_child(lbl)
 		hints.append(lbl)
 
 		var panel := PanelContainer.new()
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(0.02, 0.03, 0.05, 0.72)
-		sb.border_color = Color(0.35, 0.55, 1.0, 0.35)
-		sb.border_width_left = 2
-		sb.set_content_margin_all(28)
-		sb.set_corner_radius_all(6)
-		panel.add_theme_stylebox_override("panel", sb)
+		panel.add_theme_stylebox_override("panel", UITheme.panel(28))
+		UITheme.add_brackets(panel)
 		panel.visible = false
 		var story_lbl := RichTextLabel.new()
 		story_lbl.bbcode_enabled = true
 		story_lbl.scroll_active = false
 		story_lbl.fit_content = true
 		story_lbl.custom_minimum_size = Vector2(STORY_PANEL_W, 0)
-		story_lbl.add_theme_font_size_override("normal_font_size", 21)
-		story_lbl.add_theme_font_size_override("bold_font_size", 21)
-		story_lbl.add_theme_font_size_override("italics_font_size", 21)
+		story_lbl.add_theme_font_override("normal_font", UITheme.mono())
+		story_lbl.add_theme_font_override("bold_font", UITheme.mono(700))
+		story_lbl.add_theme_font_override("italics_font", UITheme.mono(400, true))
+		for f in ["normal_font_size", "bold_font_size", "italics_font_size"]:
+			story_lbl.add_theme_font_size_override(f, 18)
+		story_lbl.add_theme_color_override("default_color", Color(UITheme.H_TEXT))
+		story_lbl.add_theme_constant_override("line_separation", 3)
 		panel.add_child(story_lbl)
 		layer.add_child(panel)
 		story_panels.append(panel)
@@ -277,10 +275,14 @@ func _update_ui() -> void:
 		layer.scale = Vector2.ONE * maxf(vp.size.y / 1080.0, 0.5) if vp else Vector2.ONE
 	_update_story_panels()
 	var full := get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
-	var t := "[color=#7fd4ff][b]drag[/b][/color] [color=#8a8f99]rotate[/color]      "
-	t += "[color=#7fd4ff][b]wheel[/b][/color] [color=#8a8f99]zoom[/color]      "
-	t += "[color=#7fd4ff][b]T[/b][/color] [color=#8a8f99]3D format:[/color] [color=#ddd]%s[/color]      " % stereo.mode_name()
-	t += "[color=#7fd4ff][b]F[/b][/color] [color=#8a8f99]fullscreen:[/color] [color=#ddd]%s[/color]" % ("on" if full else "off")
+	var key := func(k: String, what: String) -> String:
+		return "[color=#%s]%s[/color] [color=#%s]%s[/color]" % [UITheme.H_HI, k, UITheme.H_DIM, what]
+	var val := func(v: String) -> String:
+		return " [color=#%s]%s[/color]" % [UITheme.H_TEXT, v.to_upper()]
+	var gap := "   [color=#%s]|[/color]   " % UITheme.H_FAINT
+	var t: String = key.call("DRAG", "ROTATE") + gap + key.call("WHEEL", "ZOOM") + gap
+	t += key.call("T", "3D FORMAT") + val.call(stereo.mode_name()) + gap
+	t += key.call("F", "FULLSCREEN") + val.call("on" if full else "off")
 	for h in hints:
 		h.text = t
 

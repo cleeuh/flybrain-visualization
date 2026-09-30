@@ -415,39 +415,54 @@ func _kill_tween() -> void:
 
 func panel_text() -> String:
 	var s := slide()
-	var t := "[color=#7fd4ff][b]THE FLY BRAIN[/b][/color]  [color=#666]· slide %d / %d[/color]\n\n" % [index + 1, SLIDES.size()]
-	t += "[font_size=34][b]%s[/b][/font_size]\n" % s.title
-	t += "[color=#9fb4c8][i]%s[/i][/color]\n" % s.sci
+	var title := "THE FLY BRAIN"
+	var count := "SLIDE %02d/%02d" % [index + 1, SLIDES.size()]
+	# monospace, so padding with spaces right-aligns the counter against the end of the rule
+	var t := "[color=#%s]%s[/color]%s[color=#%s]%s[/color]\n" % [UITheme.H_HI, title,
+		" ".repeat(RULE_CHARS - title.length() - count.length()), UITheme.H_DIM, count]
+	t += _rule() + "\n"
+	t += "[font_size=30][b]%s[/b][/font_size]\n" % s.title.to_upper()
+	t += "[color=#%s][i]%s[/i][/color]\n" % [UITheme.H_SUB, s.sci]
 	if s.has("abbr"):
-		t += "[color=#e8c27a]%s[/color]\n" % s.abbr
+		t += "[color=#%s]%s[/color]\n" % [UITheme.H_HI, s.abbr]
 	t += "\n%s\n" % s.body
 	if s.get("credits", false):
 		t += _credits_text()
-	t += "\n[color=#666]%s[/color]\n" % _progress_bar()
+	t += "\n%s\n" % _progress_bar()
 	if s.get("credits", false):
-		t += "[color=#8f8]→ start over[/color]"
+		t += "[color=#%s]→ START OVER[/color]" % UITheme.H_HI
 	else:
-		t += "[color=#777]← → slides[/color]"
+		t += "[color=#%s]← → SLIDES[/color]" % UITheme.H_DIM
 	return t
+
+
+const RULE_CHARS := 50   ## panel text width in monospace characters
+
+
+static func _rule() -> String:
+	return "[color=#%s]%s[/color]\n" % [UITheme.H_FAINT, "─".repeat(RULE_CHARS)]
 
 
 ## The attributions live here, on the closing slide, rather than on screen the whole time.
 func _credits_text() -> String:
-	var t := "\n[color=#7fd4ff]─────────────[/color]\n"
-	t += "[color=#aaa]%d neurons · %d skeleton segments rendered[/color]\n\n" % [
-		_neurons.index.size(), _neurons.segment_count]
+	var t := "\n" + _rule()
+	t += "[color=#%s]%d NEURONS · %d SKELETON SEGMENTS RENDERED[/color]\n\n" % [
+		UITheme.H_SUB, _neurons.index.size(), _neurons.segment_count]
 	for c in CREDITS:
 		if c[0] == "":
-			t += "[color=#888]%s[/color]\n" % c[1]
+			t += "[color=#%s]%s[/color]\n" % [UITheme.H_DIM, c[1]]
 		else:
-			t += "[color=#e8c27a]%s[/color]  [color=#aaa]%s[/color]\n" % [c[0], c[1]]
-	t += "\n[color=#888]The flashes are simulated activity: random regions are stimulated and spikes "
+			t += "[color=#%s]%s[/color]  [color=#%s]%s[/color]\n" % [
+				UITheme.H_HI, String(c[0]).to_upper(), UITheme.H_SUB, c[1]]
+	t += "\n[color=#%s]The flashes are simulated activity: random regions are stimulated and spikes " % UITheme.H_DIM
 	t += "spread across the real synaptic graph.[/color]\n"
 	return t
 
 
+## Segmented progress strip: slides seen are half-lit, the current one bright.
 func _progress_bar() -> String:
 	var out := ""
 	for i in SLIDES.size():
-		out += "■" if i == index else "□"
+		var c: String = UITheme.H_HI if i == index else (UITheme.H_HI + "66" if i < index else UITheme.H_FAINT)
+		out += "[color=#%s]▮[/color]" % c
 	return out
