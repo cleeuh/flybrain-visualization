@@ -19,6 +19,7 @@ var story: Story
 var fly: Fly
 var story_panels: Array[PanelContainer] = []
 var story_labels: Array[RichTextLabel] = []
+var illustrations: Array[Illustration] = []   ## per-slide schematic under each eye's narration
 var rois: Node3D
 var hints: Array[RichTextLabel] = []         ## key strip, bottom left of each eye
 var ribbon_width := 1.2
@@ -218,7 +219,13 @@ func _build_ui() -> void:
 			story_lbl.add_theme_font_size_override(f, 18)
 		story_lbl.add_theme_color_override("default_color", Color(UITheme.H_TEXT))
 		story_lbl.add_theme_constant_override("line_separation", 3)
-		panel.add_child(story_lbl)
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 18)
+		col.add_child(story_lbl)
+		var fig := Illustration.new()
+		col.add_child(fig)
+		panel.add_child(col)
+		illustrations.append(fig)
 		layer.add_child(panel)
 		story_panels.append(panel)
 		story_labels.append(story_lbl)
@@ -232,6 +239,7 @@ func _update_story_panels() -> void:
 	for i in story_panels.size():
 		story_panels[i].visible = true
 		story_labels[i].text = text
+		illustrations[i].kind = story.slide().get("illus", "")
 	if new_slide:
 		_animate_panel_in()
 	_place_story_panels()

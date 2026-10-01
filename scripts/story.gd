@@ -22,6 +22,7 @@ extends Node
 ##   zoom      padding on the computed framing distance (>1 pulls back, <1 crops in)
 ##   classes   neuron superclasses to show; omitted / empty = all
 ##   credits   true on the closing slide: appends CREDITS; → from it starts over
+##   illus     animated schematic under the narration (Illustration.kind); omitted = none
 
 const SHELL_BASE_ALPHA := 0.25
 const ROI_ALPHA := 0.75   ## lit neuropil opacity, scaled down when a slide lights many
@@ -66,6 +67,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Vision",
+		"illus": "vision",
 		"sci": "Optic lobes · Lobus opticus — lamina, medulla, lobula, lobula plate",
 		"abbr": "LA · ME · LO · LOP · AME",
 		"body": "More than half the brain is devoted to seeing. Each compound eye feeds ~800 "
@@ -78,6 +80,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Smell",
+		"illus": "smell",
 		"sci": "Antennal lobe · Lobus antennalis",
 		"abbr": "AL",
 		"body": "The first olfactory relay, the insect counterpart of the vertebrate olfactory bulb. "
@@ -89,6 +92,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Learning and memory",
+		"illus": "memory",
 		"sci": "Mushroom body · Corpus pedunculatum",
 		"abbr": "CA · PED · αL · α'L · βL · β'L · γL",
 		"body": "About 2 000 Kenyon cells per side take a sparse, near-random sample "
@@ -101,6 +105,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Instinct",
+		"illus": "instinct",
 		"sci": "Lateral horn · Cornu laterale",
 		"abbr": "LH",
 		"body": "The innate half of the olfactory system. The same projection neurons that teach the "
@@ -112,6 +117,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Finding the way",
+		"illus": "compass",
 		"sci": "Central complex · Complexus centralis",
 		"abbr": "EB · FB · PB · NO",
 		"body": "The fly's compass and steering committee, straddling the midline. Ring neurons and "
@@ -124,6 +130,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Hearing and touch",
+		"illus": "hearing",
 		"sci": "AMMC and wedge · Centrum mechanosensorium antennale et motorium",
 		"abbr": "AMMC · WED · SAD",
 		"body": "The antenna is also an ear. Johnston's organ, at its base, converts the vibration of "
@@ -136,6 +143,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Taste and eating",
+		"illus": "taste",
 		"sci": "Gnathal ganglia · Ganglion gnathale (subesophageal zone)",
 		"abbr": "GNG · PRW · FLA",
 		"body": "The mouth's brain, fused to the underside of the rest. Taste bristles on the "
@@ -148,6 +156,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "From brain to body",
+		"illus": "descend",
 		"sci": "Neck connective · Connectivum cervicale — descending neurons",
 		"abbr": "≈ 1 300 DNs",
 		"body": "Only about 1 300 descending neurons per side carry the brain's decisions into the "
@@ -160,6 +169,7 @@ const SLIDES: Array[Dictionary] = [
 	},
 	{
 		"title": "Walking and flying",
+		"illus": "gait",
 		"sci": "Ventral nerve cord · Ganglion thoracicoabdominale",
 		"abbr": "LegNp(T1–T3) · WTct · HTct · NTct · ANm",
 		"body": "The fly's spinal cord, and the place where movement is actually produced. Three leg "

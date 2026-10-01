@@ -32,6 +32,13 @@ small key hint in the bottom-left corner (rotate, zoom, `T` 3D format, `F` fulls
 carries the credits (dataset, licence, rendering and stereo attributions), and **→** from it
 starts the tour over.
 
+Region slides (vision through walking) also carry an **animated schematic** under the narration —
+a compound eye seeing a moving object, odour reaching the glomeruli, sparse Kenyon-cell codes,
+the head-direction bump, courtship song, proboscis extension, descending commands, the tripod
+gait ([`scripts/illustration.gd`](scripts/illustration.gd)). They are flat 2D drawings in a
+dashed frame labelled *ILLUSTRATION · SCHEMATIC, NOT DATA*, so they can't be mistaken for the
+connectome; a slide's `illus` field picks one.
+
 The opening fly is the **flybody** model (Vaxenburg et al. 2024, TuragaLab / Janelia,
 Apache-2.0 — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)): the connectome data is
 nervous system only, so `tools/fetch_fly_body.py` (step 3 of `download_data.sh`) poses the
@@ -201,6 +208,7 @@ shaders/neuron_ribbon.gdshader   screen-space ribbon expansion, per-class colour
 scripts/stereo_rig.gd  stereo cameras + output packing (SBS half / full / mono)
 shaders/stereo_composite.gdshader   packs the two eye renders into the display's format
 scripts/story.gd       guided slide tour: slide data, region framing, shell / neuropil fades
+scripts/illustration.gd  animated schematic figures shown under a slide's narration
 tools/fetch_fly_body.py  flybody body model -> data/meshes/fly/*.bmesh + data/fly.json (rig)
 scripts/fly.gd         rigged whole fly for the opening slide (hover, wings, legs, antennae)
 scripts/orbit.gd       orbit camera (animated pivot, so the tour can fly into a region; drag / wheel)
