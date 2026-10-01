@@ -112,7 +112,7 @@ def main():
           f"{(in_deg + out_deg == 0).sum()} isolated neurons")
 
     json.dump({"regions": regions, "membership": membership, "nt": nt_label, "nt_sign": nt_sign,
-               "edges": int(len(pre))}, open(os.path.join(DATA, "sim.json"), "w"))
+               "edges": int(len(pre))}, open(os.path.join(DATA, "sim.json"), "w"), allow_nan=False)
     rc = np.zeros(len(regions), int)
     for m in membership:
         for r, _ in m:

@@ -288,14 +288,17 @@ def main():
             buf[:, 15] = rng.random()
             fh.write(buf.tobytes())
             lo = np.minimum(lo, np.minimum(p0.min(0), p1.min(0))); hi = np.maximum(hi, np.maximum(p0.max(0), p1.max(0)))
-            index.append({"bodyId": int(row.bodyId), "type": row.type, "group": gid[row.superclass], "side": side, "segments": k})
+            # row.type is NaN for untyped neurons; JSON's NaN is not valid JSON and Godot
+            # refuses the whole file, so write null instead.
+            ntype = row.type if isinstance(row.type, str) else None
+            index.append({"bodyId": int(row.bodyId), "type": ntype, "group": gid[row.superclass], "side": side, "segments": k})
             n_seg += k; counts[row.superclass] += 1
             if i % 500 == 0:
                 print(f"  {i}/{len(rows)}  segments so far: {n_seg}", flush=True)
     json.dump({"groups": [{"id": gid[g], "name": g, "count": counts[g]} for g in groups],
                "neurons": len(index), "segments": n_seg,
                "aabb_min": lo.tolist(), "aabb_max": hi.tolist(),
-               "index": index}, open(os.path.join(OUT, "neurons.json"), "w"))
+               "index": index}, open(os.path.join(OUT, "neurons.json"), "w"), allow_nan=False)
     print(f"done: {len(index)} neurons, {n_seg} segments, {os.path.getsize(out)/1e6:.1f} MB")
 
 

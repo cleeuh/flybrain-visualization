@@ -90,15 +90,31 @@ picture of "what talks to what", not a biophysical simulation. Sampling more neu
 
 ## Setup
 
-1. Fetch and convert the data (~1.8 GB download, cached in `data/raw/`; produces ~230 MB in `data/`):
+1. Fetch and convert the data (~1.9 GB download, cached in `data/raw/`; produces ~230 MB in `data/`):
 
    ```sh
-   ./download_data.sh                          # installs python deps, runs both steps below
+   ./download_data.sh                               # runs the pipeline in Docker
    ./download_data.sh --neurons 2 --skel-eps 0.5    # denser sample (more GPU memory)
+   ./download_data.sh --local                       # use the host's python instead
    ```
 
-   This runs `tools/fetch_data.py` (meshes + skeletons) and `tools/build_sim.py`
-   (synaptic graph + neuropil membership for the simulation).
+   This builds the image from the [`Dockerfile`](Dockerfile) and runs
+   `tools/pipeline.sh` inside it with `data/` bind-mounted, so the only requirement on
+   the host is Docker. The three steps are `tools/fetch_data.py` (neuropil meshes +
+   neuron skeletons), `tools/build_sim.py` (synaptic graph + neuropil membership for
+   the simulation) and `tools/fetch_fly_body.py` (the flybody model). At the end it
+   verifies every file the viewer loads, so a partial download fails loudly instead of
+   producing a build with an empty scene.
+
+   **Why Docker:** the pipeline needs `fast-simplification`, `cloud-volume`, `pyarrow`
+   and `scipy`, which only publish wheels for released Python versions. On a host whose
+   interpreter is newer than those wheels — or externally managed (PEP 668) without
+   `venv`/`ensurepip` — the dependency install cannot succeed and the pipeline silently
+   produces nothing. Pinning the interpreter in the image makes it reproducible. Use
+   `--local` if you already have a working environment.
+
+   Raw downloads are cached in `data/raw/`, so interrupting and re-running is cheap and
+   only the missing pieces are fetched.
 
 2. Run:
 
@@ -176,6 +192,8 @@ Scene units are micrometres; the EM Y axis is flipped and the CNS is centred at 
 ```
 tools/fetch_data.py    download + decimate meshes, RDP-simplify skeletons, write binaries
 data/                  generated (git-ignored): meshes/*.bmesh, neurons.mm, *.json
+Dockerfile             pinned python environment for the data pipeline
+tools/pipeline.sh      the three pipeline steps, plus a completeness check
 tools/build_sim.py     neuropil membership (2 µm ROI volume), NT signs, synaptic edges
 scripts/sim.gd         leaky integrate-and-fire spreading activation, activity texture
 scripts/neurons.gd     MultiMesh loader (one instance per segment)

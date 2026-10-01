@@ -13,3 +13,7 @@ export.cfg
 # Downloaded / generated connectome data (run tools/fetch_data.py)
 data/
 build/
+
+# Python
+__pycache__/
+*.pyc

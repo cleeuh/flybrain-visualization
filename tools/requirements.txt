@@ -3,5 +3,6 @@ pandas
 pyarrow
 requests
 trimesh
+scipy          # trimesh.fix_normals() needs it; without it decimation fails
 fast-simplification
 cloud-volume
