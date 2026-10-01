@@ -93,6 +93,14 @@ def load_obj(path):
     return np.array(vs, float), np.array(fs, np.int64)
 
 
+def _swap_sides(name):
+    """flybody's left / right are anatomical, but the connectome as displayed is a mirror image
+    (fetch_data.py flips the EM image's Y), so its "(L)" regions sit on the side where flybody's
+    *right* parts land. Relabel the sides so "left" means the same side in both: antenna_left
+    sits in front of AL(L), coxa_T1_left under LegNp(T1)(L), and so on."""
+    return name.replace("_left", "_#").replace("_right", "_left").replace("_#", "_right")
+
+
 def main():
     xml_path = fetch(f"{ASSETS}/fruitfly.xml", os.path.join(RAW, "fruitfly.xml"))
     fetch(f"{BASE}/LICENSE", os.path.join(RAW, "LICENSE"))
@@ -123,7 +131,8 @@ def main():
                 else:
                     kind = "eyes" if mat == "red" else "body"
                 parts.setdefault(kind, []).append((v, f))
-            bodies.append({"name": name, "parent": parent_name, "world": w, "parts": parts})
+            bodies.append({"name": _swap_sides(name), "parent": _swap_sides(parent_name),
+                           "world": w, "parts": parts})
             walk(b, name, w)
 
     walk(root.find("worldbody"), "", np.eye(4))

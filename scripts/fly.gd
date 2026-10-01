@@ -45,6 +45,14 @@ var flying := false
 
 var _mats: Array[ShaderMaterial] = []
 var _base_alpha := {}         # material -> alpha at full opacity
+var _mat_part := {}           # material -> "body:kind" (e.g. "antenna_left:body", "head:eyes")
+var _alpha := 0.0             ## whole-fly opacity (the tour's fly slides)
+var _parts: Array = []        ## part filters shown on their own (see show_parts)
+var _parts_alpha := 0.0
+var _overrides := {}          ## body name -> [abduct, twist, extend] at rest (see set_part_pose)
+var _nodes := {}              ## body name -> Node3D
+var _part_mesh := {}          ## "body:kind" -> Mesh
+var _inst: Array[Dictionary] = []   ## {mi, solid, glass, tag}: parts are shown as glass
 var _body: Node3D
 var _t := 0.0
 var _rest_box := AABB()       ## bounds of the whole animal in the rest pose
@@ -77,12 +85,13 @@ func _ready() -> void:
 		parent.add_child(n)
 		nodes[b.name] = n
 		world[b.name] = w
+		_nodes[b.name] = n
 		for m in b.meshes:
-			_part(m.file, m.kind, n, w)
+			_part(m.file, m.kind, n, w, "%s:%s" % [b.name, m.kind])
 		var name: String = b.name
 		if name.begins_with("wing_"):
 			_wings.append({"node": n, "rest_world": w, "parent_inv": parent_w.affine_inverse(),
-				"side": -1.0 if name.ends_with("left") else 1.0})
+				"side": signf(w.origin.x)})             # flap direction follows which side it is on
 		elif b.parent != "":
 			var key := name.trim_suffix("_left").trim_suffix("_right")
 			_joints.append({"node": n, "rest": n.transform, "name": name, "pose": FLIGHT_POSE.get(key, [0.0, 0.0, 0.0])})
@@ -90,7 +99,7 @@ func _ready() -> void:
 
 
 ## One converted mesh on body node `parent` (rest pose `rest` in body space).
-func _part(file: String, kind: String, parent: Node3D, rest: Transform3D) -> void:
+func _part(file: String, kind: String, parent: Node3D, rest: Transform3D, tag: String) -> void:
 	var mesh := BMesh.load("res://data/meshes/%s" % file)
 	if mesh == null:
 		return
@@ -101,6 +110,17 @@ func _part(file: String, kind: String, parent: Node3D, rest: Transform3D) -> voi
 		"membrane": mi.material_override = _material(WING, true)
 		"veins": mi.material_override = _material(WING, false)
 		_: mi.material_override = _material(BODY, false)
+	_mat_part[mi.material_override] = tag
+	_part_mesh[tag] = mesh
+	# shown on its own (show_parts) a part is drawn as translucent glass like the brain shells,
+	# so it gives the anatomy's shape without covering the neurons
+	var glass := ShaderMaterial.new()
+	glass.shader = load("res://shaders/fly_glass.gdshader")
+	var gc: Color = (mi.material_override as ShaderMaterial).get_shader_parameter("color")
+	glass.set_shader_parameter("color", Color(gc, 0.0))
+	glass.set_shader_parameter("fill", 0.03)
+	glass.set_shader_parameter("rim", 0.7)
+	_inst.append({"mi": mi, "solid": mi.material_override, "glass": glass, "tag": tag})
 	parent.add_child(mi)
 	_grow(rest, mesh)
 
@@ -127,18 +147,99 @@ func _material(color: Color, glass: bool) -> ShaderMaterial:
 
 ## 0 = fully transparent (and hidden), 1 = as built.
 func set_alpha(a: float) -> void:
-	for m in _mats:
-		var c: Color = m.get_shader_parameter("color")
-		c.a = _base_alpha[m] * a
-		m.set_shader_parameter("color", c)
-	visible = a > 0.001
+	_alpha = a
+	_apply_alpha()
 
 
 func alpha() -> float:
-	if _mats.is_empty():
-		return 0.0
-	var c: Color = _mats[0].get_shader_parameter("color")
-	return c.a / maxf(_base_alpha[_mats[0]], 0.001)
+	return _alpha
+
+
+## Show only some body parts, at opacity `a`, independently of the whole-fly fade — the slides
+## use this to put the real eyes, antennae, proboscis or legs next to the brain. A filter
+## matches a body name prefix ("antenna", "coxa_T1"), optionally with a kind ("head:eyes").
+func show_parts(filters: Array, a: float) -> void:
+	if filters == _parts and absf(a - _parts_alpha) < 0.002:
+		return                      # called every frame; only re-apply on a real change
+	_parts = filters
+	_parts_alpha = a
+	_apply_alpha()
+
+
+## Rest-pose joint angles [abduct (Z), twist (Y), extend (X)] per body, used while the fly is
+## not hovering; bodies not listed sit at rest. Called every frame by an animation.
+func set_part_pose(poses: Dictionary) -> void:
+	_overrides = poses
+
+
+## World position of a point on a part: its mesh's bounds centre, or (tip) the bounds corner
+## farthest from the body's joint.
+func part_point(tag: String, tip := false) -> Vector3:
+	var body := tag.get_slice(":", 0)
+	var n: Node3D = _nodes.get(body)
+	var mesh: Mesh = _part_mesh.get(tag if tag.contains(":") else tag + ":body")
+	if n == null or mesh == null:
+		return Vector3.ZERO
+	var box := mesh.get_aabb()
+	if not tip:
+		return n.global_transform * box.get_center()
+	var best := box.get_center()
+	for i in 8:
+		var c := box.get_endpoint(i)
+		if c.length_squared() > best.length_squared():
+			best = c
+	return n.global_transform * best
+
+
+## World-space vertices of a part (e.g. "head:eyes"), for aiming stimuli at its surface.
+func part_vertices(tag: String) -> PackedVector3Array:
+	var body := tag.get_slice(":", 0)
+	var n: Node3D = _nodes.get(body)
+	var mesh: Mesh = _part_mesh.get(tag)
+	var out := PackedVector3Array()
+	if n == null or mesh == null:
+		return out
+	var xf := n.global_transform
+	for v in mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]:
+		out.append(xf * v)
+	return out
+
+
+func _apply_alpha() -> void:
+	var any := false
+	for it in _inst:
+		var mi: MeshInstance3D = it.mi
+		var solid: ShaderMaterial = it.solid
+		var glass: ShaderMaterial = it.glass
+		if _alpha > 0.001:
+			if mi.material_override != solid:
+				mi.material_override = solid
+			var c: Color = solid.get_shader_parameter("color")
+			c.a = _base_alpha[solid] * _alpha
+			solid.set_shader_parameter("color", c)
+			mi.visible = true
+		elif _parts_alpha > 0.001 and _matches(it.tag):
+			if mi.material_override != glass:
+				mi.material_override = glass
+			var g: Color = glass.get_shader_parameter("color")
+			g.a = _parts_alpha
+			glass.set_shader_parameter("color", g)
+			mi.visible = true
+		else:
+			mi.visible = false
+		any = any or mi.visible
+	visible = any
+
+
+func _matches(tag: String) -> bool:
+	for f in _parts:
+		var fs := String(f)
+		if fs.contains(":"):
+			if tag == fs or (tag.begins_with(fs.get_slice(":", 0)) and tag.ends_with(":" + fs.get_slice(":", 1))):
+				return true
+		elif tag.begins_with(fs) and not tag.ends_with(":eyes"):
+			return true
+	return false
 
 
 func _process(dt: float) -> void:
@@ -148,7 +249,12 @@ func _process(dt: float) -> void:
 	if _ease <= 0.0:
 		_body.transform = Transform3D.IDENTITY
 		for j in _joints:
-			j.node.transform = j.rest
+			var o: Array = _overrides.get(j.name, [])
+			if o.is_empty():
+				j.node.transform = j.rest
+			else:
+				var b := Basis(Vector3.BACK, o[0]) * Basis(Vector3.UP, o[1]) * Basis(Vector3.RIGHT, o[2])
+				j.node.transform = j.rest * Transform3D(b, Vector3.ZERO)
 		for w in _wings:
 			w.node.transform = w.parent_inv * w.rest_world
 		return

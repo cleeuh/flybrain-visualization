@@ -20,6 +20,7 @@ extends Node
 ##   neurons   false to hide the neuron ribbons (default true)
 ##   yaw/pitch camera angles in degrees
 ##   zoom      padding on the computed framing distance (>1 pulls back, <1 crops in)
+##   dist      camera distance in µm, overriding the computed framing
 ##   classes   neuron superclasses to show; omitted / empty = all
 ##   credits   true on the closing slide: appends CREDITS; → from it starts over
 ##   illus     animated schematic under the narration (Illustration.kind); omitted = none
@@ -33,6 +34,10 @@ const FLY_SECONDS := 1.6      ## shell / neuropil cross-fade time; the rig eases
 ## Fraction of the frame width the narration panel covers on the right; the rendered image
 ## is lens-shifted left by this much so the subject stays clear of it.
 const VIEW_SHIFT := 0.16
+## Closest the camera frames a region slide (µm). Small neuropils (the noduli, an antennal lobe)
+## would otherwise fill the screen and lose all context; from here the rest of the brain, the
+## signal flow and the stimuli around it stay in view.
+const MIN_FRAME_DIST := 850.0
 
 const SLIDES: Array[Dictionary] = [
 	{
@@ -155,7 +160,9 @@ const SLIDES: Array[Dictionary] = [
 			+ "It is also a bottleneck: most descending neurons heading for the nerve cord pass "
 			+ "through this region, which is why feeding, grooming and locomotion are so tightly "
 			+ "interlocked.",
-		"rois": ["GNG", "PRW", "FLA"], "shell": 0.0, "yaw": 0.0, "pitch": 20.0, "zoom": 1.25,
+		# from in front and to the side, a little above: the proboscis hangs below the front of
+		# the head, so it is in view with the GNG it is wired to
+		"rois": ["GNG", "PRW", "FLA"], "shell": 0.0, "yaw": 145.0, "pitch": -20.0, "dist": 2200.0,
 	},
 	{
 		"title": "From brain to body",
@@ -181,7 +188,8 @@ const SLIDES: Array[Dictionary] = [
 			+ "Above them the tectulum drives the wings and halteres — wing (WTct), haltere (HTct) "
 			+ "and neck (NTct) control — and the abdominal neuromere (ANm) handles the rest of the body.",
 		"rois": ["LegNp(T1)", "LegNp(T2)", "LegNp(T3)", "WTct(UTct-T2)", "HTct(UTct-T3)", "NTct(UTct-T1)", "ANm", "IntTct", "LTct"],
-		"shell": 0.35, "yaw": 25.0, "pitch": -10.0, "zoom": 1.25,
+		# seen from above, the classic view of a walking insect: the legs spread around the cord
+		"shell": 0.35, "yaw": 20.0, "pitch": -82.0, "zoom": 2.4,
 		"classes": ["vnc_intrinsic", "vnc_sensory", "vnc_motor", "vnc_efferent", "descending_neuron", "ascending_neuron"],
 	},
 	{
@@ -317,7 +325,8 @@ func _apply() -> void:
 	var yaw := float(s.get("yaw", 0.0))
 	var pitch := float(s.get("pitch", -10.0))
 	_rig.auto_rotate = true
-	_rig.goto(box.get_center(), yaw, pitch, _framing_distance(box, yaw, pitch, float(s.get("zoom", 1.25))))
+	var dist := float(s["dist"]) if s.has("dist") else _framing_distance(box, yaw, pitch, float(s.get("zoom", 1.25)))
+	_rig.goto(box.get_center(), yaw, pitch, dist)
 	changed.emit()
 
 
@@ -338,7 +347,7 @@ func _framing_distance(box: AABB, yaw: float, pitch: float, pad: float) -> float
 	# framed on the box's mid-plane (+ a little of its depth): framing the front face as well
 	# would push the camera back far enough to make every subject look small.
 	var dist := maxf(ext.x / tan(half_h), ext.y / tan(half_v)) * pad + ext.z * 0.3
-	return maxf(dist, _stereo.near * 4.0)
+	return maxf(dist, MIN_FRAME_DIST)
 
 
 ## World-space box the slide wants framed.

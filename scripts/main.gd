@@ -69,6 +69,7 @@ func _ready() -> void:
 	stimulus = Stimulus.new()
 	stimulus.name = "Stimulus"
 	stimulus.flow = flow
+	stimulus.fly = fly
 	stimulus.head = rig.head
 	stimulus.rois = roi_by_name
 	scene_root.add_child(stimulus)
