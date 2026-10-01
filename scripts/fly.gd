@@ -1,16 +1,20 @@
 class_name Fly
 extends Node3D
-## A stylised whole fly, built procedurally, for the opening slide of the tour.
+## The whole fly for the opening slide of the tour.
 ##
-## The connectome data is nervous system only — there is no body mesh — so this draws one
-## around it: head, eyes, thorax, abdomen, wings, halteres and legs as scaled spheres and
-## cylinders in the same additive "glass" shader as the brain shells. It is laid out in the
-## data's own coordinates (micrometres, -Z anterior) so the brain sits inside the head and
-## the ventral nerve cord inside the thorax, which is what makes the fade on slide 2 read as
-## "the body dissolves and leaves the nervous system behind".
+## The connectome data is nervous system only, so the body comes from flybody (Vaxenburg et al.
+## 2024, TuragaLab/flybody, Apache-2.0; see THIRD_PARTY_NOTICES.md), converted by
+## tools/fetch_fly_body.py into data/meshes/fly/*.bmesh + data/fly.json, already placed in the data's own
+## coordinates (micrometres, -Z anterior) with the brain inside the head. The body is drawn
+## solid (shaders/fly.gdshader) so its anatomy reads, and dissolves on slide 2 to leave the
+## nervous system behind; only the wing membranes are translucent (shaders/fly_glass.gdshader,
+## depth-tested so the body hides them).
 ##
-## `flying` hovers the whole animal on a lazy figure-of-eight and flaps the wings; turning it
-## off eases the body back to the rest pose the CNS is aligned with.
+## The model is rigged from flybody's own body tree (67 segments). `flying` hovers the animal on
+## a lazy figure-of-eight, flaps the wings about their hinges, tucks the legs into the flight
+## posture (where they drift slowly, each on its own timing), twitches the antennae,
+## pumps the abdomen and beats the halteres; turning it off eases everything back to the rest
+## pose the CNS is aligned with.
 
 const BODY := Color(1.0, 0.72, 0.38, 1.0)
 const EYE := Color(1.0, 0.25, 0.18, 1.0)
@@ -18,97 +22,87 @@ const WING := Color(0.62, 0.80, 1.0, 1.0)
 
 const FLAP_HZ := 7.0          ## visual flap rate (a real fly's 200 Hz just aliases)
 const WANDER := 130.0         ## µm of hover drift
+## Flight posture, [abduct (Z), twist (Y), extend (X)] in radians per flybody segment, from
+## FlyGym's flybody flight pose (NeLy-EPFL/flygym, Apache-2.0): front legs folded up under the
+## head, middle legs rolled in, hind legs trailing, proboscis retracted. Both sides use the same
+## values; the model's mirrored joint frames make them symmetric.
+const FLIGHT_POSE := {
+	"coxa_T1": [0.0, 0.0, 0.0584], "femur_T1": [0.0, 0.0, -0.142],
+	"tibia_T1": [0.0, 0.0, -1.29], "tarsus_T1": [0.0, 0.0, -0.242],
+	"coxa_T2": [-0.292, -0.742, 0.408], "femur_T2": [0.0, 0.608, 0.208],
+	"tibia_T2": [0.0, 0.0, -1.34], "tarsus_T2": [0.0, 0.0, 0.608],
+	"coxa_T3": [0.0, 0.00841, 0.158], "femur_T3": [0.0, 0.558, 0.258],
+	"tibia_T3": [0.0, 0.0, -0.292], "tarsus_T3": [0.0, 0.0, 0.258],
+	"rostrum": [0.0, 0.0, 0.8], "haustellum": [0.0, 0.0, 0.8],
+}
+## Amplitude (radians) of each leg segment's slow drift around the flight posture.
+const LEG_DRIFT := {"coxa": 0.04, "femur": 0.07, "tibia": 0.09, "tarsus_": 0.07}
+## Per-leg timing offsets, so no two legs move together.
+const LEG_PHASE := {"T1_left": 0.0, "T1_right": 2.1, "T2_left": 4.3, "T2_right": 1.2, "T3_left": 3.4, "T3_right": 5.5}
 
 ## Hovering on / off. Off eases the body back to rest, where it lines up with the CNS.
 var flying := false
 
 var _mats: Array[ShaderMaterial] = []
 var _base_alpha := {}         # material -> alpha at full opacity
-var _wings: Array[Node3D] = []
 var _body: Node3D
 var _t := 0.0
 var _rest_box := AABB()       ## bounds of the whole animal in the rest pose
 var _ease := 0.0              ## 0 at rest, 1 fully into the hover
+var _joints: Array[Dictionary] = []   ## {node, rest (local), name}
+var _wings: Array[Dictionary] = []    ## {node, rest_world, parent_inv, side}
 
 
 func _ready() -> void:
 	_body = Node3D.new()
 	_body.name = "Body"
 	add_child(_body)
-
-	# Head, thorax and abdomen along -Z (anterior), so the brain lands inside the head and
-	# the ventral nerve cord inside the thorax.
-	_part(Vector3(0, 55, -560), Vector3(258, 238, 215), BODY, 0.035)         # head
-	_part(Vector3(-200, 75, -600), Vector3(155, 185, 155), EYE, 0.07)        # compound eyes
-	_part(Vector3(200, 75, -600), Vector3(155, 185, 155), EYE, 0.07)
-	_part(Vector3(0, -140, -650), Vector3(75, 115, 80), BODY, 0.06)          # proboscis
-	_part(Vector3(-75, -30, -740), Vector3(35, 55, 75), BODY, 0.06)          # antennae
-	_part(Vector3(75, -30, -740), Vector3(35, 55, 75), BODY, 0.06)
-	_part(Vector3(0, -45, 150), Vector3(330, 315, 380), BODY, 0.025)         # thorax
-	_part(Vector3(0, -95, 760), Vector3(265, 245, 340), BODY, 0.025)         # abdomen, tapering
-	_part(Vector3(0, -110, 1070), Vector3(205, 190, 265), BODY, 0.025)
-	_part(Vector3(0, -120, 1300), Vector3(125, 115, 165), BODY, 0.025)
-	_part(Vector3(-190, -140, 430), Vector3(45, 45, 55), BODY, 0.06)         # halteres
-	_part(Vector3(190, -140, 430), Vector3(45, 45, 55), BODY, 0.06)
-
-	# wings, on pivots at the top of the thorax so they can flap
-	for side in [-1.0, 1.0]:
-		var pivot := Node3D.new()
-		pivot.position = Vector3(side * 70, 200, 90)
-		_body.add_child(pivot)
-		var wing := _part(Vector3(side * 430, 20, 640), Vector3(330, 14, 700), WING, 0.03, pivot)
-		wing.rotation_degrees = Vector3(0, side * -14, 0)
-		_wings.append(pivot)
-
-	# three pairs of legs: coxa -> knee -> tarsus, splayed forward, out and back
-	var legs := [
-		[Vector3(215, -230, -130), Vector3(450, -560, -430), Vector3(520, -790, -230)],
-		[Vector3(260, -240, 140), Vector3(540, -590, 130), Vector3(600, -820, 340)],
-		[Vector3(250, -230, 390), Vector3(560, -560, 630), Vector3(630, -800, 900)],
-	]
-	for leg in legs:
-		for side in [-1.0, 1.0]:
-			var m := Vector3(side, 1, 1)
-			_limb(leg[0] * m, leg[1] * m, 34.0, 22.0)
-			_limb(leg[1] * m, leg[2] * m, 22.0, 10.0)
-
+	var meta = JSON.parse_string(FileAccess.get_file_as_string("res://data/fly.json"))
+	if meta == null:
+		push_warning("Fly: data/fly.json missing (run tools/fetch_fly_body.py) — no fly")
+		return
+	# the MJCF body tree: every node's rest transform is stored in body space; parents come first
+	var nodes := {}
+	var world := {}
+	for b in meta.bodies:
+		var bs: Array = b.basis
+		var o: Array = b.origin
+		var w := Transform3D(Basis(Vector3(bs[0][0], bs[0][1], bs[0][2]), Vector3(bs[1][0], bs[1][1], bs[1][2]),
+			Vector3(bs[2][0], bs[2][1], bs[2][2])), Vector3(o[0], o[1], o[2]))
+		var parent: Node3D = nodes.get(b.parent, _body)
+		var parent_w: Transform3D = world.get(b.parent, Transform3D.IDENTITY)
+		var n := Node3D.new()
+		n.name = b.name
+		n.transform = parent_w.affine_inverse() * w
+		parent.add_child(n)
+		nodes[b.name] = n
+		world[b.name] = w
+		for m in b.meshes:
+			_part(m.file, m.kind, n, w)
+		var name: String = b.name
+		if name.begins_with("wing_"):
+			_wings.append({"node": n, "rest_world": w, "parent_inv": parent_w.affine_inverse(),
+				"side": -1.0 if name.ends_with("left") else 1.0})
+		elif b.parent != "":
+			var key := name.trim_suffix("_left").trim_suffix("_right")
+			_joints.append({"node": n, "rest": n.transform, "name": name, "pose": FLIGHT_POSE.get(key, [0.0, 0.0, 0.0])})
 	set_alpha(0.0)
 
 
-## One scaled sphere. `fill` is the shell shader's flat term; the rest is the fresnel rim.
-func _part(pos: Vector3, radii: Vector3, color: Color, fill: float, parent: Node3D = null) -> MeshInstance3D:
+## One converted mesh on body node `parent` (rest pose `rest` in body space).
+func _part(file: String, kind: String, parent: Node3D, rest: Transform3D) -> void:
+	var mesh := BMesh.load("res://data/meshes/%s" % file)
+	if mesh == null:
+		return
 	var mi := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 1.0
-	sphere.height = 2.0
-	sphere.radial_segments = 24
-	sphere.rings = 12
-	mi.mesh = sphere
-	mi.transform = Transform3D(Basis.IDENTITY.scaled(radii), pos)
-	mi.material_override = _material(color, fill)
-	var holder: Node3D = parent if parent != null else _body
-	holder.add_child(mi)
-	_grow((holder.transform if parent != null else Transform3D.IDENTITY) * mi.transform, mi.mesh)
-	return mi
-
-
-## A tapered cylinder from `a` to `b` — one leg segment.
-func _limb(a: Vector3, b: Vector3, r_start: float, r_end: float) -> void:
-	var span := b - a
-	var mi := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = r_start
-	cyl.bottom_radius = r_end
-	cyl.height = span.length()
-	cyl.radial_segments = 8
-	cyl.rings = 1
-	mi.mesh = cyl
-	# the mesh runs along +Y from its centre, so rotate +Y onto the segment
-	var basis := Basis(Quaternion(Vector3.UP, -span.normalized()))
-	mi.transform = Transform3D(basis, a + span * 0.5)
-	mi.material_override = _material(BODY, 0.05)
-	_body.add_child(mi)
-	_grow(mi.transform, mi.mesh)
+	mi.mesh = mesh
+	match kind:
+		"eyes": mi.material_override = _material(EYE, false)
+		"membrane": mi.material_override = _material(WING, true)
+		"veins": mi.material_override = _material(WING, false)
+		_: mi.material_override = _material(BODY, false)
+	parent.add_child(mi)
+	_grow(rest, mesh)
 
 
 func _grow(xf: Transform3D, mesh: Mesh) -> void:
@@ -121,12 +115,11 @@ func rest_aabb() -> AABB:
 	return _rest_box
 
 
-func _material(color: Color, fill: float) -> ShaderMaterial:
+## Solid (shaders/fly.gdshader), or depth-tested translucent glass for the wing membranes.
+func _material(color: Color, glass: bool) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
-	m.shader = load("res://shaders/shell.gdshader")
+	m.shader = load("res://shaders/fly_glass.gdshader" if glass else "res://shaders/fly.gdshader")
 	m.set_shader_parameter("color", color)
-	m.set_shader_parameter("fill", fill)
-	m.set_shader_parameter("rim", 0.65)
 	_mats.append(m)
 	_base_alpha[m] = color.a
 	return m
@@ -154,14 +147,56 @@ func _process(dt: float) -> void:
 	_ease = move_toward(_ease, 1.0 if flying else 0.0, dt * 1.2)
 	if _ease <= 0.0:
 		_body.transform = Transform3D.IDENTITY
+		for j in _joints:
+			j.node.transform = j.rest
+		for w in _wings:
+			w.node.transform = w.parent_inv * w.rest_world
 		return
 	_t += dt
+	var e := _ease
 	var drift := Vector3(sin(_t * 0.7) * WANDER, sin(_t * 1.27) * WANDER * 0.55,
-		cos(_t * 0.52) * WANDER * 0.8) * _ease
-	var tilt := Basis.from_euler(Vector3(deg_to_rad(sin(_t * 1.1) * 5.0 * _ease),
-		deg_to_rad(sin(_t * 0.6) * 14.0 * _ease), deg_to_rad(sin(_t * 0.9) * 9.0 * _ease)))
+		cos(_t * 0.52) * WANDER * 0.8) * e
+
+	var tilt := Basis.from_euler(Vector3(deg_to_rad(sin(_t * 1.1) * 5.0 * e),
+		deg_to_rad(sin(_t * 0.6) * 14.0 * e), deg_to_rad(sin(_t * 0.9) * 9.0 * e)))
 	_body.transform = Transform3D(tilt, drift)
-	var flap := sin(_t * TAU * FLAP_HZ) * 38.0 * _ease
-	for i in _wings.size():
-		var side := -1.0 if i == 0 else 1.0
-		_wings[i].rotation_degrees = Vector3(0, 0, side * flap)
+
+	# wings flap about the body's long axis through their hinge
+	var flap := sin(_t * TAU * FLAP_HZ) * deg_to_rad(38.0) * e
+	for w in _wings:
+		var rw: Transform3D = w.rest_world
+		var about := Transform3D(Basis(Vector3.BACK, w.side * flap), Vector3.ZERO)
+		var world := Transform3D(Basis.IDENTITY, rw.origin) * about * Transform3D(Basis.IDENTITY, -rw.origin) * rw
+		w.node.transform = w.parent_inv * world
+
+	# flight posture, eased in, plus the segment's own motion about its bend axis (local X);
+	# abduct / twist / extend compose in the MJCF joint order Z, Y, X
+	for j in _joints:
+		var p: Array = j.pose
+		var extend: float = p[2] + _joint_angle(j.name)
+		var b := Basis(Vector3.BACK, p[0] * e) * Basis(Vector3.UP, p[1] * e) * Basis(Vector3.RIGHT, extend * e)
+		j.node.transform = j.rest * Transform3D(b, Vector3.ZERO)
+
+
+## Motion of one body segment on top of its flight posture (radians about local X).
+func _joint_angle(name: String) -> float:
+	# legs: a slow, small drift around the tucked pose, each leg on its own timing, the
+	# distal segments trailing the proximal ones so the leg moves as one limb
+	for k in LEG_DRIFT:
+		if name.begins_with(k):
+			var leg := name.substr(name.find("_T") + 1)
+			var ph: float = LEG_PHASE.get(leg, 0.0)
+			var lag := 0.5 if k == "tibia" or k == "tarsus_" else 0.0
+			var t := _t + ph
+			return LEG_DRIFT[k] * (0.7 * sin(t * 1.1 - lag) + 0.3 * sin(t * 2.3 + ph - lag))
+	if name.begins_with("antenna"):
+		var side := 0.0 if name.ends_with("left") else 1.7
+		return 0.12 + 0.12 * sin(_t * TAU * 0.8 + side) + 0.05 * sin(_t * TAU * 2.3 + side * 2.0)
+	if name == "head":
+		return 0.06 * sin(_t * TAU * 0.35)
+	if name.begins_with("abdomen"):
+		var i := name.trim_prefix("abdomen").trim_prefix("_").to_int()
+		return -0.025 + 0.035 * sin(_t * TAU * 0.6 - i * 0.4)
+	if name.begins_with("haltere"):
+		return 0.18 * sin(_t * TAU * FLAP_HZ + PI)  # beat in antiphase to the wings
+	return 0.0

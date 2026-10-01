@@ -4,7 +4,8 @@ Renders the FlyEM / Janelia **male adult *Drosophila* CNS connectome** (male-cns
 brain + ventral nerve cord) in Godot 4.7 as an interactive, auto-rotating, side-by-side
 stereo visualization.
 
-Data: https://male-cns.janelia.org/download/ (CC-BY 4.0).
+Data: https://male-cns.janelia.org/download/ (CC-BY 4.0). Fly body: [flybody](https://github.com/TuragaLab/flybody)
+(Apache-2.0) — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ## What it shows
 
@@ -19,7 +20,7 @@ Data: https://male-cns.janelia.org/download/ (CC-BY 4.0).
 **The app is the tour** — there is no free-flight mode. It is a narrated slide sequence
 stepped with the **← / →** arrow keys. Each slide flies the camera to its framing; you can
 rotate (drag, WASD) and zoom (wheel, Q/E) around it until the next slide takes over. It opens on the
-fly itself — a stylised whole animal hovering with its wings flapping — then dissolves the
+fly itself — the whole animal hovering with its wings flapping — then dissolves the
 body to reveal the nervous system inside it, flies into the head while the outer shell fades
 to fully transparent, and visits
 one region per slide — optic lobes, antennal lobe, mushroom body, lateral horn, central
@@ -31,10 +32,14 @@ small key hint in the bottom-left corner (rotate, zoom, `T` 3D format, `F` fulls
 carries the credits (dataset, licence, rendering and stereo attributions), and **→** from it
 starts the tour over.
 
-The opening fly is [`scripts/fly.gd`](scripts/fly.gd): the connectome data is nervous system
-only, so the body is built procedurally from scaled spheres and cylinders in the same shell
-shader, laid out in the data's own coordinates so the brain sits inside the head and the
-nerve cord inside the thorax — which is what makes the dissolve line up.
+The opening fly is the **flybody** model (Vaxenburg et al. 2024, TuragaLab / Janelia,
+Apache-2.0 — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)): the connectome data is
+nervous system only, so `tools/fetch_fly_body.py` (step 3 of `download_data.sh`) poses the
+model's meshes, converts them to micrometres and places the head around the connectome's brain.
+It is exported as flybody's own body tree (67 jointed segments, `data/fly.json`), so
+[`scripts/fly.gd`](scripts/fly.gd) can animate it while it hovers: wings flap on their hinges,
+legs tuck into the flight posture from FlyGym and drift slowly around it, antennae twitch, the abdomen pumps and the halteres beat. The body
+is drawn solid (`shaders/fly.gdshader`) and dissolves on slide 2 to leave the nervous system.
 
 Slides are plain data at the top of [`scripts/story.gd`](scripts/story.gd) — edit `SLIDES`
 to re-order, re-word or add regions (`rois` takes neuropil names as in `data/rois.json`,
@@ -178,7 +183,8 @@ shaders/neuron_ribbon.gdshader   screen-space ribbon expansion, per-class colour
 scripts/stereo_rig.gd  stereo cameras + output packing (SBS half / full / mono)
 shaders/stereo_composite.gdshader   packs the two eye renders into the display's format
 scripts/story.gd       guided slide tour: slide data, region framing, shell / neuropil fades
-scripts/fly.gd         procedural stylised fly for the opening slide (hover + wing flap)
+tools/fetch_fly_body.py  flybody body model -> data/meshes/fly/*.bmesh + data/fly.json (rig)
+scripts/fly.gd         rigged whole fly for the opening slide (hover, wings, legs, antennae)
 scripts/orbit.gd       orbit camera (animated pivot, so the tour can fly into a region; drag / wheel)
 scripts/main.gd        glue, keys, narration panel and key hint, 3D-format config
 ```

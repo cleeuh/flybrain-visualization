@@ -185,6 +185,8 @@ const CREDITS := [
 	["Data", "FlyEM / Janelia male adult CNS connectome, male-cns v1.0 (CC-BY 4.0)"],
 	["", "male-cns.janelia.org/download"],
 	["Rendering", "Godot 4.7 · additive screen-space ribbons, one MultiMesh"],
+	["Fly body", "flybody, Vaxenburg et al. 2024 (TuragaLab / Janelia, Apache-2.0)"],
+	["", "github.com/TuragaLab/flybody"],
 	["Stereo", "off-axis side-by-side"],
 ]
 
