@@ -1,5 +1,6 @@
-// Solid body for the whole fly: opaque and depth-tested so its geometry reads, with simple
-// view-space key / fill lighting and a soft fresnel rim that keeps it in the hologram style.
+// Solid body for the whole fly: opaque and depth-tested so its geometry reads, with soft
+// view-space lighting (wrapped diffuse, broad sheen) and a fresnel rim that keeps it in the
+// hologram style.
 // Fading out (color.a < 1) dissolves it with an ordered screen-space dither rather than
 // blending, so it never turns into overlapping glass.
 shader_type spatial;
@@ -20,9 +21,11 @@ void fragment() {
 	vec3 n = normalize(FRONT_FACING ? NORMAL : -NORMAL);   // view space
 	vec3 v = normalize(VIEW);
 	vec3 key = normalize(vec3(-0.45, 0.7, 0.55));
-	float diff = max(dot(n, key), 0.0);
+	// wrapped diffuse: light rolls softly round the curves instead of cutting off at a terminator
+	float wrap = clamp((dot(n, key) + 0.5) / 1.5, 0.0, 1.0);
 	float hemi = 0.5 + 0.5 * n.y;
-	float spec = pow(max(dot(reflect(-key, n), v), 0.0), 28.0);
+	// broad, faint sheen like waxy cuticle rather than a sharp hotspot
+	float spec = pow(max(dot(reflect(-key, n), v), 0.0), 10.0);
 	float f = pow(1.0 - abs(dot(n, v)), rim_power);
-	ALBEDO = color.rgb * (0.05 + 0.15 * hemi + 0.6 * diff * diff) + vec3(0.18 * spec) + color.rgb * rim * f;
+	ALBEDO = color.rgb * (0.08 + 0.14 * hemi + 0.62 * wrap * wrap) + vec3(0.07 * spec) + color.rgb * rim * f;
 }

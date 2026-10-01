@@ -23,8 +23,17 @@ import numpy as np
 
 
 
+def weld(v, f, tol=1e-6):
+    """Merge vertices that share a position (the OBJs repeat them per triangle), so normals
+    average across neighbouring faces and the surface shades smoothly instead of faceted."""
+    key = np.round(v / tol).astype(np.int64)
+    _, first, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
+    return v[first], inv.reshape(-1)[f]
+
+
 def write_mesh(path, v, f):
     """Same .bmesh layout as fetch_data.py (kept separate so this needs only numpy)."""
+    v, f = weld(v, f)
     fn = np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]])     # area-weighted
     n = np.zeros_like(v)
     for k in range(3):
