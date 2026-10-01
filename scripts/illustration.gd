@@ -38,10 +38,14 @@ const FLOW_NOTES := {
 	"instinct": "3D: projection neurons → lateral horn neurons",
 	"compass": "3D: ring neurons → EPG → PFN → FB columnar neurons",
 	"hearing": "3D: Johnston's organ neurons → AMMC → WED / SAD",
-	"taste": "3D: leg taste neurons → GNG neurons → proboscis motor neurons",
+	"taste": "3D: leg taste → GNG → proboscis motor neurons",
 	"descend": "3D: descending neurons down, ascending neurons up",
 	"gait": "3D: leg motor neurons, tripod by tripod",
 }
+
+## Clock source: the slide's SignalFlow, so the figure, the 3D stimuli and the pulses on real
+## neurons all share one cycle (stimulus arrives at cycle start; see Stimulus / SignalFlow).
+var flow: SignalFlow
 
 var kind := "":
 	set(v):
@@ -74,7 +78,7 @@ func _draw() -> void:
 	draw_string(font, Vector2(10, size.y - 30), CAPTIONS.get(kind, ""), HORIZONTAL_ALIGNMENT_LEFT,
 		size.x - 20, 12, LINE)
 	var area := Rect2(10, LABEL_H + 4, size.x - 20, size.y - LABEL_H - CAPTION_H - 8)
-	var t := Time.get_ticks_msec() / 1000.0
+	var t := flow.time() if flow != null else Time.get_ticks_msec() / 1000.0
 	match kind:
 		"vision": _vision(area, t)
 		"smell": _smell(area, t)
@@ -88,6 +92,15 @@ func _draw() -> void:
 
 
 # --------------------------------------------------------------------------- helpers
+
+## Position in the shared cycle: 0 = the stimulus arrives / the first neurons fire.
+static func _cyc(t: float) -> float:
+	return fposmod(t, SignalFlow.PERIOD)
+
+
+## 0..1 while a stimulus travels in during the last Stimulus.LEAD s of a cycle, 1 on arrival.
+static func _arrive(t: float) -> float:
+	return fposmod(t + Stimulus.LEAD, SignalFlow.PERIOD) / Stimulus.LEAD
 
 func _hex(c: Vector2, rad: float) -> PackedVector2Array:
 	var p := PackedVector2Array()
@@ -125,8 +138,8 @@ func _vision(a: Rect2, t: float) -> void:
 	var cols := int(a.size.x * 0.62 / dx)
 	var rows := int(a.size.y / (rad * 1.5)) - 1
 	var origin := a.position + Vector2(rad + 4, rad + 4)
-	var u := fmod(t / 6.0, 1.0)
-	var obj := origin + Vector2(lerpf(-40.0, cols * dx + 40.0, u), a.size.y * 0.45 + sin(t * 1.3) * 18.0)
+	var u := fposmod(t / SignalFlow.PERIOD + 0.5, 1.0)          # centre of the eye at cycle start
+	var obj := origin + Vector2(lerpf(-40.0, cols * dx + 40.0, u), a.size.y * 0.45)
 	for row in rows:
 		for col in cols:
 			var c := origin + Vector2(col * dx + (dx * 0.5 if row % 2 else 0.0), row * rad * 1.5)
@@ -138,7 +151,7 @@ func _vision(a: Rect2, t: float) -> void:
 	var wr := Rect2(world, Vector2(85, a.size.y - 16))
 	draw_rect(wr, DIM, false, 1.0)
 	draw_string(UITheme.mono(), wr.position + Vector2(4, 13), "SCENE", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, DIM)
-	var op := wr.position + Vector2(wr.size.x * u, wr.size.y * 0.5 + sin(t * 1.3) * 18.0 * wr.size.y / a.size.y)
+	var op := wr.position + Vector2(wr.size.x * u, wr.size.y * 0.5)
 	if wr.has_point(op):
 		draw_circle(op, 9.0, LINE)
 	draw_line(Vector2(world.x - 10, a.get_center().y), Vector2(origin.x + cols * dx + 4, a.get_center().y), FAINT, 1.0)
@@ -151,17 +164,18 @@ func _smell(a: Rect2, t: float) -> void:
 	_fruit(src, 16.0, HI)
 	draw_line(ant + Vector2(0, -30), ant + Vector2(8, 30), LINE, 3.0)           # antenna
 	draw_string(UITheme.mono(), ant + Vector2(-26, 46), "ANTENNA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, DIM)
-	var arrived := 0.0
-	for i in 14:
-		var u := fmod(t * 0.35 + i / 14.0, 1.0)
+	var arrive := _arrive(t)
+	for i in 9:
+		var u := arrive - i * 0.04
+		if u <= 0.0 or u > 1.0:
+			continue
 		var p := src.lerp(ant, u) + Vector2(0, sin(u * 9.0 + i) * 14.0 * (1.0 - u))
-		draw_circle(p, 2.5, Color(HI, 1.0 - u * 0.6))
-		if u > 0.85:
-			arrived += 1.0
+		draw_circle(p, 2.5, Color(HI, 1.0 - u * 0.4))
 	# glomeruli: a cluster; odour pattern = a fixed subset, brightness with recent arrivals
 	var gc := a.position + Vector2(a.size.x * 0.8, a.size.y * 0.5)
 	var pattern := [1, 4, 5, 9, 12]
-	var level := clampf(arrived / 3.0, 0.0, 1.0)
+	var c := _cyc(t)
+	var level := 1.0 - smoothstep(2.0, 3.0, c)        # lit from arrival, as the 3D neurons fire
 	for i in 14:
 		var ang := i * 2.4
 		var p := gc + Vector2(cos(ang), sin(ang)) * (12.0 + 4.6 * sqrt(i) * 5.0) * 0.55
@@ -175,28 +189,28 @@ func _smell(a: Rect2, t: float) -> void:
 ## Memory: two odours alternate; each lights its own sparse set of Kenyon cells, and odour A's
 ## set is tagged with a reward.
 func _memory(a: Rect2, t: float) -> void:
-	var phase := int(t / 3.0) % 2
-	var names := ["ODOUR A", "ODOUR B"]
+	# one rewarded odour per cycle, on the 3D flow's timing: Kenyon cells fire at 1.0 s,
+	# PAM dopamine at 2.0 s, the output neurons at 2.2 s
+	var c := _cyc(t)
 	var font := UITheme.mono()
-	draw_string(font, a.position + Vector2(0, 16), names[phase], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, HI)
+	draw_string(font, a.position + Vector2(0, 16), "ODOUR A", HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+		HI if c < 4.5 else DIM)
 	var cols := 16
 	var rows := 6
 	var g := Vector2(a.size.x * 0.62 / cols, (a.size.y - 30) / rows)
 	var o := a.position + Vector2(g.x * 0.5, 34)
-	var fade := clampf(fmod(t, 3.0) / 0.5, 0.0, 1.0)
+	var fade := clampf((c - 1.0) / 0.4, 0.0, 1.0) * (1.0 - smoothstep(4.5, 5.5, c))
 	for k in cols * rows:
-		var on := (hash(k * 7 + phase * 131) % 100) < 7         # ~7 % of cells per odour
+		var on := (hash(k * 7) % 100) < 7         # ~7 % of cells for this odour
 		var p := o + Vector2(k % cols * g.x, k / cols * g.y)
-		draw_circle(p, 5.0, Color(HI, fade) if on else FAINT)
+		draw_circle(p, 5.0, Color(HI, maxf(fade, 0.12)) if on else FAINT)
 	draw_string(font, o + Vector2(-4, rows * g.y + 2), "KENYON CELLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, DIM)
 	var tag := a.position + Vector2(a.size.x * 0.82, a.size.y * 0.5)
-	if phase == 0:
-		draw_circle(tag, 26.0 * fade, Color(HI, 0.2))
-		draw_string(font, tag + Vector2(-34, 5), "+ SUGAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, HI)
+	var reward := clampf((c - 2.0) / 0.4, 0.0, 1.0) * (1.0 - smoothstep(4.5, 5.5, c))
+	draw_circle(tag, 26.0 * reward, Color(HI, 0.2))
+	draw_string(font, tag + Vector2(-34, 5), "+ SUGAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(HI, maxf(reward, 0.15)))
+	if c > 2.2 and c < 5.5:
 		draw_string(font, tag + Vector2(-40, 44), "→ APPROACH", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, LINE)
-	else:
-		draw_string(font, tag + Vector2(-34, 5), "no reward", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, DIM)
-		draw_string(font, tag + Vector2(-34, 44), "→ IGNORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
 
 
 ## Instinct: the fly heads for food, then a wasp appears and it turns away.
@@ -212,7 +226,9 @@ func _instinct(a: Rect2, t: float) -> void:
 		draw_line(wasp + Vector2(-10 + k * 8, -10), wasp + Vector2(-10 + k * 8, 10), BAD, 2.0)
 	draw_string(font, wasp + Vector2(-20, 40), "WASP", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, BAD)
 	# fly drifts toward whichever is "smelled"; alternate every 4 s
-	var phase := fmod(t, 8.0)
+	# food on even cycles, a wasp on odd ones; the 3D odour label alternates the same way
+	var food_cycle := int(floor(t / SignalFlow.PERIOD)) % 2 == 0
+	var phase := _cyc(t) * (4.0 / SignalFlow.PERIOD) + (0.0 if food_cycle else 4.0)
 	var mid := a.get_center()
 	var pos: Vector2
 	var dir: float
@@ -234,7 +250,7 @@ func _instinct(a: Rect2, t: float) -> void:
 func _compass(a: Rect2, t: float) -> void:
 	var c := a.position + Vector2(a.size.x * 0.33, a.size.y * 0.5)
 	var rad := minf(a.size.y * 0.46, 85.0)
-	var heading := sin(t * 0.45) * 2.2 + t * 0.25
+	var heading := t * 0.3                     # turns as the 3D sun / landmark moves round
 	var n := 16
 	for i in n:
 		var a0 := TAU * i / n
@@ -259,34 +275,36 @@ func _compass(a: Rect2, t: float) -> void:
 
 ## Hearing: a pulse song waveform reaches the arista, which shakes; spikes follow below.
 func _hearing(a: Rect2, t: float) -> void:
+	# one song pulse per cycle, reaching the arista at cycle start (as in 3D), spikes after
 	var font := UITheme.mono()
+	var c := _cyc(t)
+	var arrive := _arrive(t)
 	var wave := PackedVector2Array()
 	var y0 := a.position.y + a.size.y * 0.3
 	var x1 := a.position.x + a.size.x * 0.62
+	var px := lerpf(a.position.x, x1, minf(arrive, 1.0)) if c > 0.6 else -1e4
 	for i in 120:
 		var x := lerpf(a.position.x, x1, i / 119.0)
-		var ph := (x - a.position.x) * 0.12 - t * 9.0
-		var pulse := maxf(0.0, sin(ph * 0.12)) ** 6.0                    # pulse trains
-		wave.append(Vector2(x, y0 + sin(ph * 2.0) * 18.0 * pulse))
+		var env := exp(-pow((x - px) / 40.0, 2.0))
+		wave.append(Vector2(x, y0 + sin(x * 0.25) * 18.0 * env))
 	draw_polyline(wave, HI, 1.5)
 	draw_string(font, Vector2(a.position.x, y0 - 26), "COURTSHIP SONG", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, DIM)
-	# antenna with feathery arista, shaking with the current pulse amplitude
 	var base := Vector2(x1 + 50, y0 + 10)
-	var amp := maxf(0.0, sin((x1 - a.position.x) * 0.12 * 0.12 - t * 9.0 * 0.12)) ** 6.0
-	var tip := base + Vector2(60, -40).rotated(sin(t * 40.0) * 0.25 * amp)
+	var amp := exp(-c * 2.5)
+	var tip := base + Vector2(60, -40).rotated(sin(t * 30.0) * 0.4 * amp)
 	draw_line(base, base + Vector2(0, 30), LINE, 4.0)
-	draw_line(base, tip, LINE, 1.5)
+	draw_line(base, tip, HI if amp > 0.1 else LINE, 1.5)
 	for k in 6:
 		var p := base.lerp(tip, (k + 1) / 7.0)
 		draw_line(p, p + (tip - base).orthogonal().normalized() * 7.0, DIM, 1.0)
 	draw_string(font, base + Vector2(-20, 48), "ARISTA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, DIM)
-	# spike raster of Johnston's organ
+	# Johnston's organ spikes, written left to right as the shaking goes on
 	var sy := a.position.y + a.size.y * 0.8
 	draw_line(Vector2(a.position.x, sy), Vector2(x1, sy), FAINT, 1.0)
 	for i in 60:
-		var x := lerpf(a.position.x, x1, i / 59.0)
-		var ph := (x - a.position.x) * 0.12 - t * 9.0
-		if maxf(0.0, sin(ph * 0.12)) ** 6.0 > 0.5 and i % 2 == 0:
+		var u := i / 59.0
+		if i % 2 == 0 and u < c / 1.5 and c < 3.0:
+			var x := lerpf(a.position.x, x1, u)
 			draw_line(Vector2(x, sy - 12), Vector2(x, sy), LINE, 1.5)
 	draw_string(font, Vector2(a.position.x, sy + 16), "SPIKES", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, DIM)
 
@@ -294,7 +312,9 @@ func _hearing(a: Rect2, t: float) -> void:
 ## Taste: a leg steps onto sugar, and the proboscis extends toward it.
 func _taste(a: Rect2, t: float) -> void:
 	var font := UITheme.mono()
-	var phase := fmod(t, 5.0)
+	# foot reaches the sugar at cycle start (leg taste neurons fire), proboscis extends when the
+	# motor neurons do — the same timing as the 3D stimulus
+	var phase := _cyc(t)
 	var ground := a.position.y + a.size.y - 14
 	draw_line(Vector2(a.position.x, ground), Vector2(a.end.x, ground), DIM, 1.0)
 	var sugar := Vector2(a.position.x + a.size.x * 0.32, ground - 6)
@@ -309,12 +329,12 @@ func _taste(a: Rect2, t: float) -> void:
 	draw_rect(Rect2(head + Vector2(18, -18), Vector2(110, 40)), Color(LINE, 0.15))
 	draw_rect(Rect2(head + Vector2(18, -18), Vector2(110, 40)), LINE, false, 1.5)
 	# front leg reaching down to the sugar
-	var step := smoothstep(0.0, 1.2, phase)
+	var step := 1.0 if phase < 1.5 else smoothstep(SignalFlow.PERIOD - Stimulus.LEAD, SignalFlow.PERIOD - 0.1, phase)
 	var foot := Vector2(lerpf(head.x + 30, sugar.x + 8, step), ground - 2)
 	var knee := Vector2(head.x + 10, head.y + 40)
 	draw_polyline(PackedVector2Array([head + Vector2(26, 18), knee, foot]), LINE, 2.0)
 	# proboscis extends once the foot has tasted
-	var ext := smoothstep(1.4, 2.4, phase) * (1.0 - smoothstep(4.0, 4.8, phase))
+	var ext := smoothstep(2.0, 2.8, phase) * (1.0 - smoothstep(4.6, 5.4, phase))
 	var root := head + Vector2(-8, 18)
 	var ptip := root + Vector2(-10 - 24 * ext, 14 + 40 * ext)
 	draw_line(root, ptip, HI if ext > 0.1 else LINE, 3.0)
@@ -360,7 +380,7 @@ func _gait(a: Rect2, t: float) -> void:
 	var row_h := a.size.y / 6.5
 	var x0 := a.position.x + 34
 	var x1 := a.end.x - 6
-	var period := 1.6
+	var period := SignalFlow.PERIOD             # one stride = one cycle, as the 3D legs
 	for i in 6:
 		var y := a.position.y + i * row_h + (row_h * 0.5 if i >= 3 else 0.0)
 		draw_string(font, Vector2(a.position.x, y + row_h * 0.65), legs[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 12,

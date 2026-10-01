@@ -51,6 +51,16 @@ neuropils drop to a faint outline and everything else dims meanwhile, and the ra
 stimulation pauses. Timing is slowed and illustrative. `godot --headless --path . -s
 tools/flow_test.gd` reports what each slide picked.
 
+Around them, [`scripts/stimulus.gd`](scripts/stimulus.gd) sketches the **outside world** the
+circuit responds to — an object passing the compound eye (facets light when their optical
+axis points at it), odour reaching the antennae, the sun / landmark the compass steers by,
+courtship song shaking the arista, a front leg on sugar and the proboscis extending, the legs
+stepping — in white line art labelled *(not in data)*. Lateral props use the hemisphere away
+from the camera, whose outer face is in frame. Panel figure, 3D stimulus and neuron pulses all
+run on one clock (`SignalFlow.time()`, one cycle every 6 s): each stimulus arrives at the cycle
+start, exactly when the first real neurons fire, and later events (Kenyon cells, dopamine,
+proboscis extension, the second tripod) line up with their stages.
+
 The opening fly is the **flybody** model (Vaxenburg et al. 2024, TuragaLab / Janelia,
 Apache-2.0 — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)): the connectome data is
 nervous system only, so `tools/fetch_fly_body.py` (step 3 of `download_data.sh`) poses the
@@ -222,6 +232,7 @@ shaders/stereo_composite.gdshader   packs the two eye renders into the display's
 scripts/story.gd       guided slide tour: slide data, region framing, shell / neuropil fades
 scripts/illustration.gd  animated schematic figures shown under a slide's narration
 scripts/signal_flow.gd   slide illustrations as pulses along real neurons in the 3D view
+scripts/stimulus.gd      the outside world for those slides (eye, odour, song, sugar, legs), on the same clock
 tools/fetch_fly_body.py  flybody body model -> data/meshes/fly/*.bmesh + data/fly.json (rig)
 scripts/fly.gd         rigged whole fly for the opening slide (hover, wings, legs, antennae)
 scripts/orbit.gd       orbit camera (animated pivot, so the tour can fly into a region; drag / wheel)

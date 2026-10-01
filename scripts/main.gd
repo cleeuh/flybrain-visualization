@@ -21,6 +21,7 @@ var story_panels: Array[PanelContainer] = []
 var story_labels: Array[RichTextLabel] = []
 var illustrations: Array[Illustration] = []   ## per-slide schematic under each eye's narration
 var flow: SignalFlow                         ## slide illustrations as pulses on real neurons
+var stimulus: Stimulus                       ## the outside world for those slides (sketches)
 var rois: Node3D
 var hints: Array[RichTextLabel] = []         ## key strip, bottom left of each eye
 var ribbon_width := 1.2
@@ -65,6 +66,12 @@ func _ready() -> void:
 	flow.sim = sim
 	flow.rois = roi_by_name
 	add_child(flow)
+	stimulus = Stimulus.new()
+	stimulus.name = "Stimulus"
+	stimulus.flow = flow
+	stimulus.head = rig.head
+	stimulus.rois = roi_by_name
+	scene_root.add_child(stimulus)
 	story.changed.connect(_on_slide_changed)
 	_apply_cmdline()
 	story.start(_start_slide)
@@ -241,6 +248,7 @@ func _build_ui() -> void:
 		col.add_theme_constant_override("separation", 18)
 		col.add_child(story_lbl)
 		var fig := Illustration.new()
+		fig.flow = flow
 		col.add_child(fig)
 		panel.add_child(col)
 		illustrations.append(fig)

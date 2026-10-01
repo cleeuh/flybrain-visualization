@@ -73,6 +73,7 @@ var _strength := 0.0
 var _target := 0.0
 var _t := 0.0
 var _centres := {}
+var _facing := "(R)"             ## hemisphere facing the slide's camera ("(L)" / "(R)")
 
 
 ## Set up the flow for `slide` (its "illus" kind); kinds without stages clear it.
@@ -96,6 +97,26 @@ func active() -> bool:
 	return _target > 0.0
 
 
+## The flow's clock (s since the slide started); every stage's pulse starts at its delay
+## past each multiple of PERIOD, so stimuli can be timed to arrive at the cycle start.
+func time() -> float:
+	return _t
+
+
+func strength() -> float:
+	return _strength
+
+
+## "(L)" / "(R)": the hemisphere facing the current slide's camera (from the slide's yaw, not the
+## camera's position mid-flight), so the 3D stimuli use the same side as the flow.
+func facing() -> String:
+	return _facing
+
+
+func kind() -> String:
+	return _kind if _target > 0.0 else ""
+
+
 func _process(dt: float) -> void:
 	if neurons == null:
 		return
@@ -108,6 +129,11 @@ func _process(dt: float) -> void:
 
 func _build(stages: Array, yaw: float) -> Dictionary:
 	var facing := _facing_suffix(yaw)
+	_facing = facing
+	if _kind == "vision":
+		# the eye (drawn by Stimulus) sits outside the lamina, so it is only in frame for the
+		# lobe on the far side; run the optic flow there too
+		facing = "(R)" if facing == "(L)" else "(L)"
 	var delays := {}
 	for st in stages:
 		var re := RegEx.create_from_string(st[0])
