@@ -8,9 +8,9 @@ extends Control
 ## at zero parallax like the rest of the panel. `kind` picks the figure (a slide's "illus").
 
 const W := 560.0
-const H := 250.0
+const H := 268.0
 const LABEL_H := 22.0
-const CAPTION_H := 30.0
+const CAPTION_H := 48.0
 
 const LINE := Color(0.82, 0.82, 0.82)
 const DIM := Color(0.45, 0.45, 0.45)
@@ -28,6 +28,19 @@ const CAPTIONS := {
 	"taste": "Sugar under a foot triggers the proboscis to extend.",
 	"descend": "Commands run down the neck; feedback from the legs runs back up.",
 	"gait": "Tripod gait: three legs on the ground at a time, alternating.",
+}
+
+## What the pulses in the 3D view run along, per figure (see SignalFlow).
+const FLOW_NOTES := {
+	"vision": "3D: photoreceptors → L1-L3 → Mi/Tm → T4/T5, LC, LPT",
+	"smell": "3D: olfactory receptor neurons → projection neurons",
+	"memory": "3D: projection neurons → Kenyon cells → MBONs; PAM dopamine",
+	"instinct": "3D: projection neurons → lateral horn neurons",
+	"compass": "3D: ring neurons → EPG → PFN → FB columnar neurons",
+	"hearing": "3D: Johnston's organ neurons → AMMC → WED / SAD",
+	"taste": "3D: leg taste neurons → GNG neurons → proboscis motor neurons",
+	"descend": "3D: descending neurons down, ascending neurons up",
+	"gait": "3D: leg motor neurons, tripod by tripod",
 }
 
 var kind := "":
@@ -56,7 +69,9 @@ func _draw() -> void:
 			[r.end, Vector2(r.position.x, r.end.y)], [Vector2(r.position.x, r.end.y), r.position]]:
 		draw_dashed_line(e[0], e[1], DIM, 1.0, 6.0)
 	draw_string(font, Vector2(10, 16), "ILLUSTRATION · SCHEMATIC, NOT DATA", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
-	draw_string(font, Vector2(10, size.y - 10), CAPTIONS.get(kind, ""), HORIZONTAL_ALIGNMENT_LEFT,
+	draw_string(font, Vector2(10, size.y - 12), "%s — real neurons, timing slowed" % FLOW_NOTES.get(kind, ""),
+		HORIZONTAL_ALIGNMENT_LEFT, size.x - 20, 11, HI)
+	draw_string(font, Vector2(10, size.y - 30), CAPTIONS.get(kind, ""), HORIZONTAL_ALIGNMENT_LEFT,
 		size.x - 20, 12, LINE)
 	var area := Rect2(10, LABEL_H + 4, size.x - 20, size.y - LABEL_H - CAPTION_H - 8)
 	var t := Time.get_ticks_msec() / 1000.0
@@ -360,4 +375,4 @@ func _gait(a: Rect2, t: float) -> void:
 				draw_rect(Rect2(x, y + 3, seg, row_h - 8), Color(HI, 0.85) if i < 3 else Color(LINE, 0.7))
 			x += 4.0
 	draw_line(Vector2(x0 + 2, a.position.y), Vector2(x0 + 2, a.end.y), DIM, 1.0)
-	draw_string(font, Vector2(x1 - 220, a.end.y + 2), "filled = foot on the ground", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, DIM)
+	draw_string(font, Vector2(x1 - 200, a.position.y - 12), "filled = foot on the ground", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, DIM)

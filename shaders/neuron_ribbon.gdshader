@@ -12,7 +12,16 @@ uniform float highlight = -1.0;   // neuron index, -1 = none
 uniform float dim_others = 1.0;   // brightness multiplier for non-highlighted neurons
 uniform sampler2D activity : filter_nearest, repeat_disable;   // 1-D, indexed by neuron id
 uniform float sim_active = 0.0;   // 1 = simulation running: rest neurons dimmed, spikes flash
-uniform float rest_level = 0.45;  // resting neurons stay readable while the sim runs
+uniform float rest_level = 0.45;
+// signal flow (slide illustrations): pulses travelling along real neurons, from where each
+// neuron receives input. Per segment, MODEL_MATRIX[1].x holds its distance along the neuron's
+// branches (µm); per neuron, `flow` holds the delay before its pulse starts (-1 = not in it).
+uniform sampler2D flow : filter_nearest, repeat_disable;
+uniform float flow_strength = 0.0;  // 0..1, eased in / out with the slide
+uniform float flow_time = 0.0;
+uniform float flow_period = 6.0;
+uniform float flow_speed = 450.0;   // µm per second
+uniform float flow_dim = 0.35;      // brightness of everything not in the flow  // resting neurons stay readable while the sim runs
 // ambient animation (scaled by the anim_level global, 0 = static)
 global uniform float anim_level;
 uniform float reveal_radius = 1e9;          // grow-in: segments farther than this from the origin are hidden
@@ -37,6 +46,21 @@ void vertex() {
 		float a = texelFetch(activity, ivec2(int(nid + 0.5), 0), 0).r;
 		vec4 flash = (colors[g] * 2.0 + vec4(0.25)) * brightness * 1.2;
 		col = mix(col * rest_level, flash, a);
+	}
+	if (flow_strength > 0.0) {
+		float delay = texelFetch(flow, ivec2(int(nid + 0.5), 0), 0).r;
+		if (delay >= 0.0) {
+			float t = mod(flow_time - delay, flow_period);
+			float d = t * flow_speed - MODEL_MATRIX[1].x;       // how far the front is past here
+			float front = exp(-d * d / (2.0 * 50.0 * 50.0));
+			float wake = d > 0.0 ? 0.4 * exp(-d / 250.0) : 0.0;
+			// hot white, so it reads against the amber neuropils and every class colour
+			vec4 lit = col * 1.2 + vec4(1.0, 0.97, 0.92, 0.0) * brightness * 12.0 * (front + wake);
+			col = mix(col, lit, flow_strength);
+			vis = max(vis, flow_strength);              // shown even if its class is hidden
+		} else {
+			col *= mix(1.0, flow_dim, flow_strength);
+		}
 	}
 	// ambient life: a faint wave rolls from the brain down the nerve cord. Off while the
 	// simulation runs (it has its own, meaningful, activity) and during a single-neuron highlight.

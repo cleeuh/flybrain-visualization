@@ -20,6 +20,7 @@ var fly: Fly
 var story_panels: Array[PanelContainer] = []
 var story_labels: Array[RichTextLabel] = []
 var illustrations: Array[Illustration] = []   ## per-slide schematic under each eye's narration
+var flow: SignalFlow                         ## slide illustrations as pulses on real neurons
 var rois: Node3D
 var hints: Array[RichTextLabel] = []         ## key strip, bottom left of each eye
 var ribbon_width := 1.2
@@ -58,6 +59,13 @@ func _ready() -> void:
 	add_child(story)
 	story.setup(rig, stereo, neurons, fly, shell_nodes, roi_by_name)
 	story.changed.connect(_update_ui)
+	flow = SignalFlow.new()
+	flow.name = "SignalFlow"
+	flow.neurons = neurons
+	flow.sim = sim
+	flow.rois = roi_by_name
+	add_child(flow)
+	story.changed.connect(_on_slide_changed)
 	_apply_cmdline()
 	story.start(_start_slide)
 	RenderingServer.global_shader_parameter_set("anim_level", 1.0 if animations else 0.0)
@@ -150,6 +158,16 @@ func _build_meshes() -> void:
 
 
 # --------------------------------------------------------------------------- input
+
+## A slide with a signal-flow illustration takes over the neurons; the random stimulation
+## pauses (and its activity clears) so the two are never on screen together.
+func _on_slide_changed() -> void:
+	flow.show_slide(story.slide())
+	if sim.loaded:
+		sim.auto_demo = not flow.active()
+		if flow.active():
+			sim.reset()
+
 
 func _unhandled_key_input(e: InputEvent) -> void:
 	if not (e is InputEventKey and e.pressed and not e.echo):

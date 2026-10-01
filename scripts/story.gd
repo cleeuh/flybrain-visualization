@@ -26,6 +26,9 @@ extends Node
 
 const SHELL_BASE_ALPHA := 0.25
 const ROI_ALPHA := 0.75   ## lit neuropil opacity, scaled down when a slide lights many
+## On slides whose illustration runs pulses through real neurons (SignalFlow), the lit neuropils
+## drop to a faint outline so the neurons inside them can be seen.
+const ROI_FLOW_SCALE := 0.3
 const FLY_SECONDS := 1.6      ## shell / neuropil cross-fade time; the rig eases in on its own
 ## Fraction of the frame width the narration panel covers on the right; the rendered image
 ## is lens-shifted left by this much so the subject stays clear of it.
@@ -275,6 +278,8 @@ func _apply() -> void:
 	# neuropils: fade out what this slide does not use, fade in what it does
 	var want := _resolve_rois(s.get("rois", []))
 	var roi_a: float = ROI_ALPHA if want.size() <= 6 else maxf(ROI_ALPHA * 6.0 / want.size(), 0.35)
+	if s.has("illus"):
+		roi_a *= ROI_FLOW_SCALE
 	for name in _lit:
 		if want.has(name):
 			continue

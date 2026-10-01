@@ -34,6 +34,12 @@ var _shown := PackedFloat32Array()          ## what the shader draws, easing tow
 var _reveal_max := 3000.0
 var _reveal_t := -1.0          ## seconds into the grow-in, -1 when not growing
 var _reveal_len := REVEAL_SECONDS
+var _mm_path := ""
+var _offsets := PackedInt32Array()          ## first segment of each neuron (neurons are contiguous)
+var _flow_img: Image                        ## per-neuron signal-flow start delay (R), -1 = not in it
+var _flow_tex: ImageTexture
+var _flow_set := PackedInt32Array()         ## neurons currently in the flow
+var flow_length := {}                       ## neuron -> longest routed path (µm), for checks
 
 
 func load_data(mm_path := "res://data/neurons.mm", json_path := "res://data/neurons.json") -> bool:
@@ -65,6 +71,16 @@ func load_data(mm_path := "res://data/neurons.mm", json_path := "res://data/neur
 	mm.custom_aabb = AABB(lo, hi - lo)
 	custom_aabb = AABB(lo, hi - lo)
 	multimesh = mm
+	_mm_path = mm_path
+	_offsets.resize(index.size() + 1)
+	var o := 0
+	for i in index.size():
+		_offsets[i] = o
+		o += int(index[i].segments)
+	_offsets[index.size()] = o
+	_flow_img = Image.create(maxi(index.size(), 1), 1, false, Image.FORMAT_RF)
+	_flow_img.fill(Color(-1, 0, 0))
+	_flow_tex = ImageTexture.create_from_image(_flow_img)
 	_reveal_max = maxf(lo.length(), hi.length()) + 100.0
 
 	material = ShaderMaterial.new()
@@ -81,6 +97,7 @@ func load_data(mm_path := "res://data/neurons.mm", json_path := "res://data/neur
 	_shown = group_visible.duplicate()
 	material.set_shader_parameter("visible_groups", _shown)
 	material.set_shader_parameter("sweep_z", Vector2(lo.z, hi.z))
+	material.set_shader_parameter("flow", _flow_tex)
 	material_override = material
 	print("Neurons: %d neurons, %d segments loaded in %d ms" % [index.size(), count, Time.get_ticks_msec() - t])
 	return true
@@ -145,6 +162,62 @@ func set_sim_active(on: bool) -> void:
 func set_highlight(neuron_idx: int) -> void:
 	material.set_shader_parameter("highlight", float(neuron_idx))
 	material.set_shader_parameter("dim_others", 1.0 if neuron_idx < 0 else 0.15)
+
+
+# --------------------------------------------------------------------------- signal flow
+
+## Segment endpoints of neuron `i`: [a0, b0, a1, b1, …] (read back from the data file).
+func segments_of(i: int) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	var f := FileAccess.open(_mm_path, FileAccess.READ)
+	if f == null or i < 0 or i >= index.size():
+		return out
+	var first := _offsets[i]
+	var k := _offsets[i + 1] - first
+	f.seek(first * 64)
+	var fl := f.get_buffer(k * 64).to_float32_array()
+	out.resize(k * 2)
+	for s in k:
+		var b := s * 16
+		var a := Vector3(fl[b + 3], fl[b + 7], fl[b + 11])
+		out[s * 2] = a
+		out[s * 2 + 1] = a + Vector3(fl[b], fl[b + 4], fl[b + 8])
+	return out
+
+
+## Store each segment's distance along the neuron's branches (µm, from wherever its signal
+## enters) in the spare basis slot the ribbon shader reads as the path coordinate. The
+## transform is rebuilt from the data file (start + direction), not read back from the
+## renderer.
+func set_path_distance(i: int, seg: PackedVector3Array, dist: PackedFloat32Array) -> void:
+	var mm := multimesh
+	var first := _offsets[i]
+	var longest := 0.0
+	for s in dist.size():
+		var a := seg[s * 2]
+		var b := Basis(seg[s * 2 + 1] - a, Vector3(dist[s], 1, 0), Vector3(0, 0, 1))
+		mm.set_instance_transform(first + s, Transform3D(b, a))
+		longest = maxf(longest, dist[s])
+	flow_length[i] = longest
+
+
+## Neurons taking part in the signal flow, with the delay (s) at which their pulse starts;
+## every other neuron is dimmed while `strength` > 0.
+func set_flow(delays: Dictionary) -> void:
+	for i in _flow_set:
+		_flow_img.set_pixel(i, 0, Color(-1, 0, 0))
+	_flow_set = PackedInt32Array()
+	for i in delays:
+		_flow_img.set_pixel(i, 0, Color(float(delays[i]), 0, 0))
+		_flow_set.append(i)
+	_flow_tex.update(_flow_img)
+
+
+func set_flow_params(strength: float, time: float, period: float, speed: float) -> void:
+	material.set_shader_parameter("flow_strength", strength)
+	material.set_shader_parameter("flow_time", time)
+	material.set_shader_parameter("flow_period", period)
+	material.set_shader_parameter("flow_speed", speed)
 
 
 func group_color(id: int) -> Color:

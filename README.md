@@ -39,6 +39,18 @@ gait ([`scripts/illustration.gd`](scripts/illustration.gd)). They are flat 2D dr
 dashed frame labelled *ILLUSTRATION · SCHEMATIC, NOT DATA*, so they can't be mistaken for the
 connectome; a slide's `illus` field picks one.
 
+In the 3D view the same slides run **signal flow on real neurons**
+([`scripts/signal_flow.gd`](scripts/signal_flow.gd)): neurons of the cell types that do the job
+are picked from the data (photoreceptors, L1–L3, Mi/Tm, T4/T5, LC and LPT cells for vision;
+receptor and projection neurons for smell; Kenyon cells, MBONs and PAM dopamine neurons for
+memory; ring, EPG, PFN and FB columnar neurons for the compass; Johnston's-organ, AMMC and
+wedge neurons; leg taste, GNG and proboscis motor neurons; descending and ascending neurons;
+leg motor neurons by tripod), each neuron's skeleton is walked as a tree from where its input
+arrives, and white pulses run outward along the real branches, stage after stage. The lit
+neuropils drop to a faint outline and everything else dims meanwhile, and the random
+stimulation pauses. Timing is slowed and illustrative. `godot --headless --path . -s
+tools/flow_test.gd` reports what each slide picked.
+
 The opening fly is the **flybody** model (Vaxenburg et al. 2024, TuragaLab / Janelia,
 Apache-2.0 — see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)): the connectome data is
 nervous system only, so `tools/fetch_fly_body.py` (step 3 of `download_data.sh`) poses the
@@ -209,6 +221,7 @@ scripts/stereo_rig.gd  stereo cameras + output packing (SBS half / full / mono)
 shaders/stereo_composite.gdshader   packs the two eye renders into the display's format
 scripts/story.gd       guided slide tour: slide data, region framing, shell / neuropil fades
 scripts/illustration.gd  animated schematic figures shown under a slide's narration
+scripts/signal_flow.gd   slide illustrations as pulses along real neurons in the 3D view
 tools/fetch_fly_body.py  flybody body model -> data/meshes/fly/*.bmesh + data/fly.json (rig)
 scripts/fly.gd         rigged whole fly for the opening slide (hover, wings, legs, antennae)
 scripts/orbit.gd       orbit camera (animated pivot, so the tour can fly into a region; drag / wheel)
