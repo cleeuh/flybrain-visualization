@@ -32,7 +32,9 @@ func _ready() -> void:
 ## Smoothly fly to a framing (used by the story tour). Angles in degrees, pivot in scene units.
 func goto(pivot: Vector3, yaw: float, pitch: float, dist: float) -> void:
 	_pivot_target = pivot
-	_yaw_target = yaw
+	# Yaw accumulates freely (auto-rotate, drag), so aim for the equivalent angle nearest the
+	# current one; otherwise the transition unwinds every full turn taken since the last slide.
+	_yaw_target = yaw_deg + wrapf(yaw - yaw_deg, -180.0, 180.0)
 	_pitch_target = clampf(pitch, -89, 89)
 	_dist_target = clampf(dist, min_distance, max_distance)
 
