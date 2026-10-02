@@ -1,7 +1,7 @@
 extends Node
 ## Male CNS connectome viewer — glue: loads data, builds the scene, runs the guided tour.
 ## The tour is the whole app: ← → step slides, drag / WASD orbit, wheel / Q E zoom,
-## T cycles the 3D format, F toggles fullscreen.
+## T cycles the 3D format, F toggles fullscreen (spanning every monitor).
 ##
 ## Command line (after `++`):  --3d=half|full|mono  --swap  --story=N  --windowed (starts fullscreen)
 ##                              --ipd=0.033  --conv=1.0  --fov=70  --width=1.2  --brightness=0.02
@@ -33,6 +33,7 @@ var _start_slide := 0
 var _panel_tween: Tween
 var _panel_slide := 0.0              ## narration panel's slide-in offset, px
 var _panel_slide_index := -1
+var _windowed_rect := Rect2i()       ## where the window goes when fullscreen is toggled off
 
 
 func _ready() -> void:
@@ -74,6 +75,8 @@ func _ready() -> void:
 	stimulus.rois = roi_by_name
 	scene_root.add_child(stimulus)
 	story.changed.connect(_on_slide_changed)
+	if get_window().mode != Window.MODE_WINDOWED:
+		_set_fullscreen(true)          # project starts fullscreen; widen it to every monitor
 	_apply_cmdline()
 	story.start(_start_slide)
 	RenderingServer.global_shader_parameter_set("anim_level", 1.0 if animations else 0.0)
@@ -199,11 +202,43 @@ func _save_screenshot(path: String) -> void:
 
 
 func _toggle_fullscreen() -> void:
+	_set_fullscreen(not _is_fullscreen())
+
+
+func _is_fullscreen() -> bool:
 	var w := get_window()
-	if w.mode == Window.MODE_FULLSCREEN or w.mode == Window.MODE_EXCLUSIVE_FULLSCREEN:
-		w.mode = Window.MODE_WINDOWED
-	else:
+	return w.borderless or w.mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
+
+
+## Fullscreen covers every monitor: Godot's own fullscreen only fills one screen, so with several
+## the window instead goes borderless over the bounding box of all of them.
+func _set_fullscreen(on: bool) -> void:
+	var w := get_window()
+	if on and w.mode == Window.MODE_WINDOWED and not w.borderless:
+		_windowed_rect = Rect2i(w.position, w.size)
+	var span := Rect2i()
+	for i in DisplayServer.get_screen_count():
+		var r := Rect2i(DisplayServer.screen_get_position(i), DisplayServer.screen_get_size(i))
+		span = r if i == 0 else span.merge(r)
+	# a single screen, or a display server that can't place windows (Wayland): plain fullscreen
+	var can_span := DisplayServer.get_screen_count() > 1 and DisplayServer.get_name() != "Wayland"
+	if on and not can_span:
+		w.borderless = false
 		w.mode = Window.MODE_FULLSCREEN
+		return
+	w.mode = Window.MODE_WINDOWED
+	if on:
+		w.borderless = true
+		w.position = span.position
+		w.size = span.size
+		return
+	w.borderless = false
+	if not _windowed_rect.has_area():   # started fullscreen: a 720p window centred on this screen
+		var screen := DisplayServer.screen_get_usable_rect(w.current_screen)
+		var size := Vector2i(1280, 720).min(screen.size)
+		_windowed_rect = Rect2i(screen.position + (screen.size - size) / 2, size)
+	w.position = _windowed_rect.position
+	w.size = _windowed_rect.size
 
 
 # --------------------------------------------------------------------------- UI (drawn in each eye)
@@ -309,7 +344,7 @@ func _update_ui() -> void:
 		var vp := layer.get_viewport()
 		layer.scale = Vector2.ONE * maxf(vp.size.y / 1080.0, 0.5) if vp else Vector2.ONE
 	_update_story_panels()
-	var full := get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
+	var full := _is_fullscreen()
 	var key := func(k: String, what: String) -> String:
 		return "[color=#%s]%s[/color] [color=#%s]%s[/color]" % [UITheme.H_HI, k, UITheme.H_DIM, what]
 	var val := func(v: String) -> String:
@@ -355,7 +390,7 @@ func _apply_cmdline() -> void:
 			"brightness": brightness = float(val)
 			"swap": stereo.swap_eyes = true
 			"story": _start_slide = int(val) - 1 if val.is_valid_int() else 0
-			"fullscreen": get_window().mode = Window.MODE_FULLSCREEN
-			"windowed": get_window().mode = Window.MODE_WINDOWED
+			"fullscreen": _set_fullscreen(true)
+			"windowed": _set_fullscreen(false)
 			"no-anim": animations = false
 			"screenshot": _shot_path = val; _shot_timer = 2.0   # save after 2 s and quit
